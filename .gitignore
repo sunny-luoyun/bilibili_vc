@@ -2,3 +2,4 @@
 *.txt
 *.db
 .DS_Store
+*.json
