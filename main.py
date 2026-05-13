@@ -250,7 +250,7 @@ def menu_create_servers():
         print("实例创建请求已提交，请稍后检查 instances_info.json")
 
 def menu_upload():
-    """5. 上传数据到服务器（每个服务器上传对应的切片文件）"""
+    """5. 上传数据到服务器（每个服务器上传对应的切片文件 + bv_fetcher.py + setup_and_run.sh）"""
     print("\n▶ 上传文件到云服务器")
     info_file = "instances_info.json"
     if not os.path.exists(info_file):
@@ -286,10 +286,14 @@ def menu_upload():
         print(f"切片文件数量({len(slice_files)})与服务器数量({len(ips)})不匹配")
         return
 
-    # 除了切片文件，还需要上传 bv_fetcher.py 脚本到每台服务器
+    # 需要上传的脚本文件（必须存在）
     bv_fetcher_script = "bv_fetcher.py"
+    setup_script = "setup_and_run.sh"
     if not os.path.exists(bv_fetcher_script):
         print(f"错误：{bv_fetcher_script} 不存在，请确保该脚本在当前目录")
+        return
+    if not os.path.exists(setup_script):
+        print(f"错误：{setup_script} 不存在，请确保该脚本在当前目录")
         return
 
     print("\n开始上传...")
@@ -319,7 +323,21 @@ def menu_upload():
             "--user", username,
             "--password", password
         ]
-        run_cmd(cmd_upload_script)
+        if not run_cmd(cmd_upload_script):
+            print(f"上传 {bv_fetcher_script} 失败，可能影响远程执行")
+
+        # 上传 setup_and_run.sh
+        remote_setup = os.path.join(remote_dir, setup_script)
+        cmd_upload_setup = [
+            sys.executable, "upload.py",
+            "--local", setup_script,
+            "--remote", remote_setup,
+            "--host", ip,
+            "--user", username,
+            "--password", password
+        ]
+        if not run_cmd(cmd_upload_setup):
+            print(f"上传 {setup_script} 失败，可能影响远程执行")
 
     print("\n✅ 所有上传任务完成")
 
@@ -345,7 +363,7 @@ def menu_remote_run():
         print(f"  python3 bv_fetcher.py -i slice_{idx}.txt -o result_{idx}.xlsx --quiet")
 
 def menu_download():
-    """7. 从服务器下载结果文件（支持多服务器，批量下载）"""
+    """7. 从服务器下载结果文件（识别 .xlsx 和 _failed.txt，不依赖 result 前缀）"""
     print("\n▶ 从服务器下载结果文件")
     info_file = "instances_info.json"
     if not os.path.exists(info_file):
@@ -368,17 +386,41 @@ def menu_download():
     remote_dir = input("远程目录 (默认 /home/ubuntu/): ").strip() or "/home/ubuntu/"
     local_dir = input("本地保存目录 (默认当前目录): ").strip() or "."
 
-    # 定义要下载的文件名模式（序号与服务器索引对应）
-    # 例如：服务器1 -> result_1.xlsx, result_1_failed.txt
-    file_suffixes = [".xlsx", "_failed.txt"]   # 可以扩展其他类型
+    # 需要匹配的文件模式
+    patterns = ["*.xlsx", "*_failed.txt"]
 
     print("\n开始下载...")
     for idx, ip in enumerate(ips, start=1):
-        print(f"\n>>> 从服务器 {idx} ({ip}) 下载")
-        for suffix in file_suffixes:
-            remote_filename = f"result_{idx}{suffix}"
-            remote_path = os.path.join(remote_dir, remote_filename)
-            # 注意：download.py 需要支持下载单个文件，且本地文件名保持不变
+        print(f"\n>>> 从服务器 {idx} ({ip}) 扫描文件")
+        # 通过 SSH 列出远程目录下匹配模式的文件
+        remote_files = []
+        try:
+            import paramiko
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(hostname=ip, username=username, password=password)
+
+            # 使用 find 命令匹配多个模式
+            find_cmd = f'find "{remote_dir}" -maxdepth 1 -type f \\( '
+            for i, pat in enumerate(patterns):
+                if i > 0:
+                    find_cmd += " -o "
+                find_cmd += f'-name "{pat}"'
+            find_cmd += " \\)"
+            stdin, stdout, stderr = ssh.exec_command(find_cmd)
+            remote_files = [line.strip() for line in stdout.readlines()]
+            ssh.close()
+        except Exception as e:
+            print(f"  ❌ 连接或扫描失败: {e}")
+            continue
+
+        if not remote_files:
+            print(f"  ⚠️ 未找到匹配的文件（模式：{patterns}）")
+            continue
+
+        print(f"  发现 {len(remote_files)} 个文件")
+        for remote_path in remote_files:
+            # 调用 download.py 下载每个文件
             cmd_download = [
                 sys.executable, "download.py",
                 "--host", ip,
@@ -387,28 +429,28 @@ def menu_download():
                 "--remote", remote_path,
                 "--local", local_dir
             ]
-            # 执行下载，如果文件不存在，download.py 会报错但不会中断整个流程
+            print(f"  下载: {os.path.basename(remote_path)}")
             run_cmd(cmd_download)
 
     print("\n✅ 下载完成，请检查本地目录")
 
 def menu_merge():
-    """8. 合并结果"""
-    print("\n▶ 合并多个结果文件")
-    # 列出当前目录下可能的 result 文件
-    result_files = [f for f in os.listdir(".") if f.startswith("result_") and (f.endswith(".xlsx") or f.endswith(".csv"))]
-    if not result_files:
-        print("未找到结果文件，请先下载")
+    """8. 合并结果文件（只合并当前目录下的 .xlsx 文件）"""
+    print("\n▶ 合并多个Excel文件")
+    # 列出当前目录下所有 .xlsx 文件
+    xlsx_files = [f for f in os.listdir(".") if f.endswith(".xlsx")]
+    if not xlsx_files:
+        print("未找到任何 .xlsx 文件")
         return
-    print("找到以下结果文件:")
-    for i, f in enumerate(result_files, 1):
+    print("找到以下Excel文件:")
+    for i, f in enumerate(xlsx_files, 1):
         print(f"  {i}. {f}")
     selected = input("请输入要合并的文件索引（用空格分隔，默认全部）: ").strip()
     if selected:
         idxs = [int(x)-1 for x in selected.split() if x.isdigit()]
-        files_to_merge = [result_files[i] for i in idxs if i < len(result_files)]
+        files_to_merge = [xlsx_files[i] for i in idxs if i < len(xlsx_files)]
     else:
-        files_to_merge = result_files
+        files_to_merge = xlsx_files
     if not files_to_merge:
         print("未选择任何文件")
         return
@@ -450,18 +492,18 @@ def menu_exit():
 def main():
     while True:
         print("\n" + "=" * 50)
-        print("B站工作流管理程序")
+        print("周刊工作流管理程序")
         print("=" * 50)
-        print("1. 采集B站视频 (crawl_to_db)")
-        print("2. 筛选视频 (filter)")
-        print("3. 切片BV号 (自定义份数)")
-        print("4. 创建云服务器 (自定义数量)")
+        print("1. 采集视频 ")
+        print("2. 筛选视频 ")
+        print("3. 切片BV号 ")
+        print("4. 创建云服务器 ")
         print("5. 上传数据到服务器")
         print("6. 生成远程采集命令")
         print("7. 下载服务器结果")
         print("8. 合并结果文件")
-        print("9. 计算得分 (score_diff)")
-        print("10. 删除所有实例")
+        print("9. 计算得分")
+        print("10. 删除所有服务器")
         print("0. 退出")
         choice = input("请选择操作: ").strip()
         if choice == "1":
