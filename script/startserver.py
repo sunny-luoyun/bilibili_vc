@@ -149,7 +149,7 @@ def main():
                 "AutomationService": {"Enabled": True}
             },
             "LoginSettings": {
-                "Password": "Sunny1318860595."     # 请确保密码符合安全规则（Ubuntu 同样支持密码登录）
+                "Password": "X#7kPm$9qL@2wR&"     # 请确保密码符合安全规则（Ubuntu 同样支持密码登录）
             }
         }
         req.from_json_string(json.dumps(params))

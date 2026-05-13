@@ -25,8 +25,8 @@ if __name__ == "__main__":
     parser.add_argument("--local", required=True, help="本地文件路径")
     parser.add_argument("--remote", required=True, help="远程保存路径（含文件名）")
     parser.add_argument("--host", required=True, help="服务器IP")
-    parser.add_argument("--user", default="ubuntu", help="SSH用户名")
-    parser.add_argument("--password", default="Sunny1318860595.", help="SSH密码")
+    parser.add_argument("--user", required=True, help="SSH用户名")
+    parser.add_argument("--password", required=True, help="SSH密码")
     args = parser.parse_args()
 
     if not os.path.isfile(args.local):

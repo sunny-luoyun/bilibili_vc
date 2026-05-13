@@ -269,7 +269,7 @@ def menu_upload():
         return
 
     username = input("SSH用户名 (默认ubuntu): ").strip() or "ubuntu"
-    password = input("SSH密码 (默认Sunny1318860595.): ").strip() or "Sunny1318860595."
+    password = input("SSH密码 (默认X#7kPm$9qL@2wR&): ").strip() or "X#7kPm$9qL@2wR&"
     remote_dir = input("远程目录 (默认 /home/ubuntu/): ").strip() or "/home/ubuntu/"
 
     # 自动检测切片文件（按顺序 slice_1.txt, slice_2.txt, slice_3.txt）
@@ -382,7 +382,7 @@ def menu_download():
         return
 
     username = input("SSH用户名 (默认ubuntu): ").strip() or "ubuntu"
-    password = input("SSH密码 (默认Sunny1318860595.): ").strip() or "Sunny1318860595."
+    password = input("SSH密码 (默认X#7kPm$9qL@2wR&): ").strip() or "X#7kPm$9qL@2wR&"
     remote_dir = input("远程目录 (默认 /home/ubuntu/): ").strip() or "/home/ubuntu/"
     local_dir = input("本地保存目录 (默认当前目录): ").strip() or "."
 
