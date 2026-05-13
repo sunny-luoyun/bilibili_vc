@@ -1,8 +1,8 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import os
 import json
-import sys
 from tencentcloud.common import credential
 from tencentcloud.common.profile.client_profile import ClientProfile
 from tencentcloud.common.profile.http_profile import HttpProfile
@@ -23,85 +23,68 @@ def load_credentials_from_json():
         raise ValueError("credentials.json 中必须包含 secret_id 和 secret_key")
     return secret_id, secret_key
 
-def get_instance_info(client, instance_id):
-    """查询单个实例的详细信息"""
-    req = models.DescribeInstancesRequest()
-    req.InstanceIds = [instance_id]
-    resp = client.DescribeInstances(req)
-    if not resp.InstanceSet:
-        raise ValueError(f"未找到实例 ID: {instance_id}")
-    return resp.InstanceSet[0]
+def load_instance_ids_from_json(filename="instances_info.json"):
+    """读取之前保存的实例信息，返回实例ID列表"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    filepath = os.path.join(script_dir, filename)
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"未找到实例信息文件：{filepath}\n请先运行 startserver.py 创建实例。")
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    instances = data.get("instances", [])
+    instance_ids = [inst["InstanceId"] for inst in instances if "InstanceId" in inst]
+    if not instance_ids:
+        raise ValueError("实例信息文件中没有有效的实例ID。")
+    return instance_ids, filepath
 
-def get_default_login_name(platform, os_name=""):
-    """根据操作系统类型返回默认登录用户名"""
-    platform_lower = platform.lower() if platform else ""
-    os_lower = os_name.lower()
-    if "windows" in platform_lower or "windows" in os_lower:
-        return "Administrator"
-    elif "ubuntu" in os_lower:
-        return "ubuntu"
-    else:
-        return "root"  # CentOS, Debian, TencentOS 等
+def delete_instances(client, instance_ids):
+    """调用 TerminateInstances 接口删除指定实例（按量计费直接销毁）"""
+    req = models.TerminateInstancesRequest()
+    # 可选：释放关联的弹性IP（如有需要，取消下面一行的注释）
+    # req.ReleaseAddress = True
+    req.InstanceIds = instance_ids
+    resp = client.TerminateInstances(req)
+    return resp
 
-def main(instance_id):
+def main():
     try:
         secret_id, secret_key = load_credentials_from_json()
         cred = credential.Credential(secret_id, secret_key)
 
-        # 配置（与创建脚本保持一致）
         httpProfile = HttpProfile()
         httpProfile.endpoint = "cvm.ap-nanjing.tencentcloudapi.com"
         clientProfile = ClientProfile()
         clientProfile.httpProfile = httpProfile
         client = cvm_client.CvmClient(cred, "ap-nanjing", clientProfile)
 
-        # 查询实例详情
-        instance = get_instance_info(client, instance_id)
+        # 读取需要删除的实例ID
+        instance_ids, json_file = load_instance_ids_from_json()
+        print(f"准备删除以下实例：{instance_ids}")
 
-        # 提取关键信息
-        state = instance.InstanceState          # PENDING, RUNNING, STOPPED 等
-        public_ips = instance.PublicIpAddresses if instance.PublicIpAddresses else []
-        private_ips = instance.PrivateIpAddresses if instance.PrivateIpAddresses else []
-        platform = getattr(instance, 'Platform', 'Unknown')
-        os_name = getattr(instance, 'OsName', '')
-        login_name = get_default_login_name(platform, os_name)
+        confirm = input("\n⚠️  删除操作不可逆，是否继续？(y/n): ").strip().lower()
+        if confirm != 'y':
+            print("操作已取消。")
+            return
 
-        print("\n" + "="*50)
-        print(f"实例 ID      : {instance_id}")
-        print(f"实例名称     : {getattr(instance, 'InstanceName', '未命名')}")
-        print(f"状态         : {state}")
-        print(f"系统平台     : {platform}   ({os_name})")
-        print(f"默认登录账号 : {login_name}")
-        print(f"公网 IP      : {public_ips[0] if public_ips else '无公网IP'}")
-        print(f"内网 IP      : {private_ips[0] if private_ips else '无内网IP'}")
-        print("="*50)
+        # 执行删除
+        resp = delete_instances(client, instance_ids)
+        print(f"删除请求已发送，RequestId: {resp.RequestId}")
 
-        # 登录提示
-        if state == "RUNNING" and public_ips:
-            print(f"\n✅ 实例已运行 🔗 公网IP: {public_ips[0]}")
-            print(f"👉 SSH 登录命令（Linux）： ssh {login_name}@{public_ips[0]}")
-            print(f"   如果使用密码登录，请先通过控制台或 API 重置密码。")
-            print(f"   （重置密码可能会强制关机，请注意服务影响）")
-        elif state == "RUNNING" and not public_ips:
-            print("\n⚠️ 实例运行中，但没有分配公网IP，无法从外网直接登录。")
-            print("   可以绑定弹性公网IP或通过跳板机内网访问。")
-        elif state == "STOPPED":
-            print("\n⏸️ 实例已关机，请先启动实例再登录。")
-        else:
-            print(f"\n⏳ 实例状态为 {state}，请等待变为 RUNNING 后再尝试登录。")
+        # 删除成功后移除JSON文件（备份可选）
+        backup = json_file + ".bak"
+        if os.path.exists(json_file):
+            os.rename(json_file, backup)
+            print(f"实例信息文件已备份为：{backup}")
 
-        # 如果是 Windows 实例，提示获取密码的方法
-        if "windows" in platform.lower() or "windows" in os_name.lower():
-            print("\n💡 Windows 实例初始密码为加密状态，需使用私钥解密。")
-            print("   控制台操作：实例列表 -> 更多 -> 密码/密钥 -> 获取管理员密码")
+        print("实例删除流程已启动，通常几分钟后实例将被彻底销毁。")
+        print("您可以通过腾讯云控制台确认实例状态。")
 
     except TencentCloudSDKException as err:
         print(f"腾讯云 API 错误：{err}")
-    except Exception as err:
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as err:
         print(f"错误：{err}")
+    except Exception as err:
+        print(f"未知错误：{err}")
 
 if __name__ == "__main__":
-    # 默认使用上次创建的实例 ID，也可以从命令行参数获取
-    default_instance_id = "ins-5b0nyfpg"
-    instance_id = sys.argv[1] if len(sys.argv) > 1 else default_instance_id
-    main(instance_id)
+    main()

@@ -3,3 +3,4 @@
 *.db
 .DS_Store
 *.json
+/instances_info.json.bak
