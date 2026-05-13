@@ -240,6 +240,7 @@ def main():
             v1_like = safe_float(r1.get("like", 0))
             title = r2.get("title", "")
             up_name = r2.get("up_name", "")
+            pubdate_str = r2.get("pubdate_str", "")
         else:
             v1_view = v1_danmaku = v1_reply = v1_fav = v1_coin = v1_like = 0.0
             title = r2.get("title", "")
@@ -269,6 +270,7 @@ def main():
             "bvid": bvid,
             "title": title,
             "up_name": up_name,
+            "pubdate_str": pubdate_str,
             # 时间点1 数据
             "view_1": v1_view,
             "danmaku_1": v1_danmaku,

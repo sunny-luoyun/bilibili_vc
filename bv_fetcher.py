@@ -410,7 +410,7 @@ def main():
 输入文件（txt/csv/xlsx）每行一个 BV 号或 B站链接。
         """,
     )
-    parser.add_argument("-i", "--input", default="filtered_videos.db", help="输入文件")
+    parser.add_argument("-i", "--input", default="1.txt", help="输入文件")
     parser.add_argument("-o", "--output", default=None, help="输出文件 (.csv/.xlsx/.json)")
     parser.add_argument("-w", "--workers", type=int, default=10, help="线程数 (默认 10)")
     parser.add_argument("-s", "--size", type=int, default=100, help="每批数量 (默认 100)")
