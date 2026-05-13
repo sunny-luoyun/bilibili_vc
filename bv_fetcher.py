@@ -127,15 +127,23 @@ def fetch_single(bvid: str) -> dict | None:
     return None
 
 
-def fetch_batch_view(bvid_list: list) -> list:
-    """串行获取一批 BVID 的 view 数据（给单线程内部用）"""
+def fetch_batch_view(bvid_list: list, verbose: bool = False) -> list:
+    """串行获取一批 BVID 的 view 数据（给单线程内部用），可实时输出每条结果"""
     results = []
     for bv in bvid_list:
         data = fetch_single(bv)
         if data is not None:
-            results.append(flatten_view(data))
+            rec = flatten_view(data)
+            results.append(rec)
+            if verbose:
+                # 输出成功信息，包含标题和播放量
+                title = rec.get("title", "")[:30]    # 截断防止太长
+                view = rec.get("view", 0)
+                print(f"  ✔ {bv}  成功 | 播放 {view} | 《{title}》")
         else:
-            pass  # 视频不存在或出错，跳过
+            if verbose:
+                print(f"  ✗ {bv}  失败/不可见")
+            # 失败的不追加，也无需重复记
     return results
 
 
@@ -175,7 +183,7 @@ def flatten_view(data: dict) -> dict:
 # 主采集流程
 # ============================================================
 
-def collect(bvid_list: list) -> list:
+def collect(bvid_list: list, verbose: bool = False) -> list:
     """
     多线程分组采集。
     - 分 N 组，每组 BATCH_SIZE 个 BV
@@ -195,7 +203,7 @@ def collect(bvid_list: list) -> list:
     failed_bvids = []
 
     with ThreadPoolExecutor(max_workers=NUM_WORKERS) as pool:
-        fut_map = {pool.submit(fetch_batch_view, batch): batch for batch in batches}
+        fut_map = {pool.submit(fetch_batch_view, batch, verbose): batch for batch in batches}
 
         done = 0
         total_batches = len(batches)
@@ -389,16 +397,22 @@ def main():
 输入文件（txt/csv/xlsx）每行一个 BV 号或 B站链接。
         """,
     )
-    parser.add_argument("-i", "--input", default="1.txt", help="输入文件")
+    parser.add_argument("-i", "--input", default="filtered_videos.db", help="输入文件")
     parser.add_argument("-o", "--output", default=None, help="输出文件 (.csv/.xlsx/.json)")
     parser.add_argument("-w", "--workers", type=int, default=10, help="线程数 (默认 10)")
     parser.add_argument("-s", "--size", type=int, default=100, help="每批数量 (默认 100)")
     parser.add_argument("--table", default=None, help="数据库中的表名（默认自动检测 filtered_videos / videos）")
     parser.add_argument("--column", default="bvid", help="表中存储 BV 号的列名（默认 bvid）")
+    parser.add_argument("--verbose", action="store_true", default=True,
+                        help="实时显示每个视频的采集状态（默认开启）")
+    parser.add_argument("--quiet", action="store_true",
+                        help="安静模式，只显示进度条，不输出每条结果")
 
     args = parser.parse_args()
     NUM_WORKERS = args.workers
     BATCH_SIZE = args.size
+    silent = args.quiet
+    verbose = not silent
 
     if args.output is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M")
@@ -421,7 +435,7 @@ def main():
     print()
 
     global_start = time.time()
-    records, failed = collect(bvids)
+    records, failed = collect(bvids, verbose=verbose)
 
     elapsed = time.time() - global_start
     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 采集完成")

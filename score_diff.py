@@ -187,8 +187,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="B站增量算分工具 - 计算两个时间点视频数据的增量得分"
     )
-    parser.add_argument("file1", help="第一个时间点的数据文件（csv/xlsx/json）")
-    parser.add_argument("file2", help="第二个时间点的数据文件（csv/xlsx/json）")
+    parser.add_argument("file1",help="第一个时间点的数据文件（csv/xlsx/json）")
+    parser.add_argument("file2",help="第二个时间点的数据文件（csv/xlsx/json）")
     parser.add_argument(
         "-o", "--output",
         default=None,

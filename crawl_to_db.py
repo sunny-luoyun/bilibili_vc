@@ -30,7 +30,8 @@ MAX_RETRY_412 = 3           # 412 错误最大重试次数
 RETRY_SLEEP_412 = 65        # 412 后等待秒数
 RETRY_SLEEP_NET = 10        # 网络错误后等待秒数
 MAX_RETRY_NET = 5           # 普通网络错误最大重试次数
-
+MAX_EMPTY_RETRIES = 3        # 空结果最大重试次数
+EMPTY_RETRY_SLEEP = 10       # 空结果重试等待秒数
 
 def init_db(db_path: str):
     """初始化 SQLite 数据库，确保视频表存在且字段齐全"""
@@ -213,11 +214,29 @@ def crawl_partition(
             videos = result.get("videos", [])
             print(f"  获取到 {len(videos)} 个视频")
 
+            # === 空结果重试机制，防止网络波动导致误判结束 ===
+
+            empty_retries = 0
+            while not videos and empty_retries < MAX_EMPTY_RETRIES:
+                empty_retries += 1
+                print(f"  本页无数据，可能网络波动，{EMPTY_RETRY_SLEEP}秒后进行第{empty_retries}次重试...")
+                time.sleep(EMPTY_RETRY_SLEEP)
+                try:
+                    result = client.get_newlist(
+                        tid=tid, page=page, page_size=page_size, order=order
+                    )
+                except Exception as e:
+                    print(f"  重试请求异常: {e}，等待后继续重试")
+                    continue
+                videos = result.get("videos", [])
+                print(f"  重试获取到 {len(videos)} 个视频")
+
             if not videos:
-                print("  本页无数据，已达到最后，爬取结束")
+                print("  本页无数据，重试后仍无数据，已达到最后，爬取结束")
                 if not incremental:
                     tracker.save(page)
                 break
+            # === 空结果重试结束 ===
 
             # 插入新视频，同时检测是否抵达水位线
             page_new = 0
@@ -302,7 +321,7 @@ def main():
                         help=f"分区 ID（默认 {DEFAULT_TID}：{PARTITION_MAP.get(DEFAULT_TID)}）")
     parser.add_argument("--page", type=int, default=None,
                         help="强制指定起始页码（提供此参数时将关闭增量模式，采用固定页码模式）")
-    parser.add_argument("--max-pages", type=int, default=20,
+    parser.add_argument("--max-pages", type=int, default=10000,
                         help="本次最多爬取页数（默认 20）")
     parser.add_argument("--page-size", type=int, default=30,
                         help="每页视频数（默认 30，最大 50）")
