@@ -438,7 +438,7 @@ def menu_merge():
     """8. 合并结果文件（只合并当前目录下的 .xlsx 文件）"""
     print("\n▶ 合并多个Excel文件")
     # 列出当前目录下所有 .xlsx 文件
-    xlsx_files = [f for f in os.listdir(".") if f.endswith(".xlsx")]
+    xlsx_files = [f for f in os.listdir("..") if f.endswith(".xlsx")]
     if not xlsx_files:
         print("未找到任何 .xlsx 文件")
         return
