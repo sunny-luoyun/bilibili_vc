@@ -44,7 +44,7 @@ from pathlib import Path
 NUM_WORKERS = 10          # 并发线程数
 MAX_RETRIES = 3           # 失败重试次数
 BATCH_SIZE = 100          # 每个线程一次处理多少个 BV
-MIN_SLEEP = 0.3           # 请求间隔下限（秒）
+MIN_SLEEP = 0.5           # 请求间隔下限（秒）
 
 UA_LIST = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -355,13 +355,26 @@ def save(records: list, path: str):
             path = path.rsplit(".", 1)[0] + ".csv"
             ext = ".csv"
 
+    # 定义清理函数
+    def sanitize_for_excel(value):
+        if not isinstance(value, str):
+            return value
+        import re
+        # 移除 ASCII 控制字符（保留 \t \n \r）
+        value = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', value)
+        # 移除常见的不可见 Unicode 字符
+        value = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]', '', value)
+        return value
+
     if ext == ".xlsx":
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "视频数据"
-        ws.append(fields)
+        ws.append(fields)   # 表头通常安全，无需清理
         for r in records:
-            ws.append([r.get(k, "") for k in fields])
+            # 清理每个单元格的值
+            row = [sanitize_for_excel(r.get(k, "")) for k in fields]
+            ws.append(row)
         wb.save(path)
     elif ext == ".json":
         with open(path, "w", encoding="utf-8") as f:
