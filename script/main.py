@@ -2,10 +2,16 @@
 # -*- coding: utf-8 -*-
 
 """
-B站工作流总控脚本
 =================
 整合采集、筛选、切片、云服务器创建、上传下载、合并、算分、删除实例等步骤。
 支持自定义切片份数、服务器数量。
+
+修复记录:
+  1. 功能6(远程命令生成) — 修复 username 未定义导致的 NameError
+  2. 全路径统一 — SCRIPT_DIR vs CWD 路径不混用
+  3. 功能6 SSH命令改为利用 setup_and_run.sh（带虚拟环境 + 依赖安装）
+  4. 功能5/7 硬编码脚本名改为 SCRIPTS 字典引用
+  5. 功能8 os.listdir("..") 修复为当前目录
 """
 
 import os
@@ -34,10 +40,19 @@ SCRIPTS = {
     "bv_fetcher": "bv_fetcher.py",
 }
 
-# 默认文件名
-DEFAULT_SOURCE_DB = "bilibili_videos.db"
-DEFAULT_FILTERED_DB = "filtered_videos.db"
+# 默认文件名（始终基于 SCRIPT_DIR 拼出完整路径，避免 CWD 不确定）
+def _script_path(*parts: str) -> str:
+    return os.path.join(SCRIPT_DIR, *parts)
+
+INSTANCES_INFO = _script_path("instances_info.json")
+DEFAULT_SOURCE_DB = _script_path("bilibili_videos.db")
+DEFAULT_FILTERED_DB = _script_path("filtered_videos.db")
 DEFAULT_SLICE_PREFIX = "slice_"
+
+# SSH 默认凭据（与 startserver.py 中 LoginSettings.Password 一致）
+DEFAULT_SSH_USER = "ubuntu"
+DEFAULT_SSH_PASS = "X#7kPm$9qL@2wR&"
+DEFAULT_REMOTE_DIR = "/home/ubuntu/"
 
 # ---------- 辅助函数 ----------
 def run_cmd(cmd: List[str], cwd=None) -> bool:
@@ -52,6 +67,29 @@ def run_cmd(cmd: List[str], cwd=None) -> bool:
     except Exception as e:
         print(f"执行异常: {e}")
         return False
+
+
+def prompt_ssh_creds() -> tuple:
+    """统一提示输入 SSH 凭据，返回 (username, password)"""
+    user = input(f"SSH用户名 (默认{DEFAULT_SSH_USER}): ").strip() or DEFAULT_SSH_USER
+    pwd = input(f"SSH密码 (默认{DEFAULT_SSH_PASS}): ").strip() or DEFAULT_SSH_PASS
+    return user, pwd
+
+
+def load_instances() -> list:
+    """从 instances_info.json 加载实例列表，返回 [{PublicIp, InstanceId, ...}]"""
+    if not os.path.exists(INSTANCES_INFO):
+        print(f"未找到实例信息文件: {INSTANCES_INFO}")
+        print("请先执行菜单4「创建云服务器」")
+        return []
+    with open(INSTANCES_INFO, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    instances = data.get("instances", [])
+    if not instances:
+        print("实例信息文件中没有实例数据")
+        return []
+    return instances
+
 
 def get_bv_list_from_db(db_path: str) -> List[str]:
     """从 SQLite 数据库的 filtered_videos 或 videos 表中读取 BV 号列表"""
@@ -79,6 +117,7 @@ def get_bv_list_from_db(db_path: str) -> List[str]:
     conn.close()
     return bvids
 
+
 def slice_bvids(bvids: List[str], num_slices: int, output_prefix: str) -> List[str]:
     """将 BV 号列表平分为 num_slices 份，生成 txt 文件，返回文件路径列表"""
     total = len(bvids)
@@ -93,22 +132,20 @@ def slice_bvids(bvids: List[str], num_slices: int, output_prefix: str) -> List[s
         end = start + slice_size + (1 if i < remainder else 0)
         slice_bv = bvids[start:end]
         fname = f"{output_prefix}{i+1}.txt"
-        with open(fname, "w", encoding="utf-8") as f:
+        full_path = os.path.join(SCRIPT_DIR, fname)
+        with open(full_path, "w", encoding="utf-8") as f:
             f.write("\n".join(slice_bv))
         files.append(fname)
         print(f"生成切片 {fname}: {len(slice_bv)} 个 BV")
         start = end
     return files
 
+
 def merge_result_files(result_files: List[str], output_path: str):
     """合并多个 bv_fetcher 生成的 Excel/CSV/JSON 文件，去重保留最新"""
     if not result_files:
         print("没有结果文件可合并")
         return
-    # 复用 slice_and_merge.py 中的 merge_results 函数
-    # 但需要导入该模块（需要确保该模块可导入且函数可用）
-    # 直接 subprocess 调用 slice_and_merge.py --mode merge 更简单，但需要传递多个文件
-    # 这里实现一个简单版合并（仅支持 Excel 和 CSV）
     import openpyxl
     import csv
 
@@ -152,47 +189,11 @@ def merge_result_files(result_files: List[str], output_path: str):
     wb.save(output_path)
     print(f"合并完成，共 {len(records_out)} 条记录 -> {output_path}")
 
-def upload_files_to_servers(server_ips: List[str], username: str, password: str, local_files: List[str], remote_dir: str = "/home/ubuntu/"):
-    """使用 upload.py 将文件上传到多台服务器（串行）"""
-    # 要求 upload.py 支持参数: python upload.py <local_path> <host> <user> <pass> [remote_path]
-    # 但现有 upload.py 硬编码，需要修改。这里调用一个增强版 upload.py
-    # 为了不修改原文件，我们在此实现一个简单的上传函数（使用 paramiko）
-    import paramiko
-    for ip in server_ips:
-        print(f"\n上传到 {ip} ...")
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        try:
-            ssh.connect(hostname=ip, username=username, password=password)
-            sftp = ssh.open_sftp()
-            for local_file in local_files:
-                remote_path = os.path.join(remote_dir, os.path.basename(local_file))
-                sftp.put(local_file, remote_path)
-                print(f"  ✅ {local_file} -> {remote_path}")
-            sftp.close()
-        except Exception as e:
-            print(f"  ❌ 上传失败: {e}")
-        finally:
-            ssh.close()
-
-def download_from_server(server_ip: str, username: str, password: str, remote_path: str, local_dir: str = "."):
-    """从单台服务器下载文件，使用 download.py 或直接实现"""
-    # 调用 download.py，需要确保该脚本支持参数
-    cmd = [
-        sys.executable, SCRIPTS["download"],
-        "--host", server_ip,
-        "--user", username,
-        "--password", password,
-        "--remote", remote_path,
-        "--local", local_dir
-    ]
-    return run_cmd(cmd)
 
 # ---------- 菜单功能实现 ----------
 def menu_crawl_to_db():
     """1. 采集B站视频（crawl_to_db.py）"""
     print("\n▶ 开始采集B站视频（分区增量模式）")
-    # 可询问额外参数，例如 --tid, --max-pages, --since
     tid = input("请输入分区ID (默认30): ").strip()
     tid = tid if tid else "30"
     max_pages = input("最多爬取页数 (默认10000): ").strip()
@@ -202,6 +203,7 @@ def menu_crawl_to_db():
     if since:
         cmd.extend(["--since", since])
     run_cmd(cmd)
+
 
 def menu_filter():
     """2. 筛选视频（filter.py）"""
@@ -214,6 +216,7 @@ def menu_filter():
     blacklist = blacklist if blacklist else "blacklist.txt"
     cmd = [sys.executable, SCRIPTS["filter"], "--min", min_sec, "--max", max_sec, "--blacklist", blacklist]
     run_cmd(cmd)
+
 
 def menu_slice():
     """3. 切片BV号（支持自定义份数）"""
@@ -235,32 +238,25 @@ def menu_slice():
     for f in files:
         print(f"  {f}")
 
+
 def menu_create_servers():
     """4. 创建云服务器（支持自定义数量）"""
     print("\n▶ 创建腾讯云CVM实例")
     count = input("请输入要创建的实例数量 (默认3): ").strip()
     count = int(count) if count.isdigit() else 3
-    # 由于原 startserver.py 硬编码 InstanceCount=1，需要修改脚本支持 --count 参数
-    # 我们调用一个修改后的版本: 确保 startserver.py 已增加 --count 参数
     cmd = [sys.executable, SCRIPTS["start_server"], "--count", str(count)]
     if not run_cmd(cmd):
         print("创建实例失败，请检查 startserver.py 是否支持 --count 参数。")
-        print("提示：可以手动修改 startserver.py，在 RunInstancesRequest 中设置 InstanceCount = count")
+        print("提示：注意脚本内置了 Ubuntu 密码 X#7kPm$9qL@2wR&")
     else:
         print("实例创建请求已提交，请稍后检查 instances_info.json")
+
 
 def menu_upload():
     """5. 上传数据到服务器（每个服务器上传对应的切片文件 + bv_fetcher.py + setup_and_run.sh）"""
     print("\n▶ 上传文件到云服务器")
-    info_file = "instances_info.json"
-    if not os.path.exists(info_file):
-        print(f"未找到 {info_file}，请先创建服务器")
-        return
-    with open(info_file, "r") as f:
-        data = json.load(f)
-    instances = data.get("instances", [])
+    instances = load_instances()
     if not instances:
-        print("没有实例信息")
         return
 
     ips = [inst["PublicIp"] for inst in instances if inst.get("PublicIp")]
@@ -268,112 +264,114 @@ def menu_upload():
         print("没有公网IP")
         return
 
-    username = input("SSH用户名 (默认ubuntu): ").strip() or "ubuntu"
-    password = input("SSH密码 (默认X#7kPm$9qL@2wR&): ").strip() or "X#7kPm$9qL@2wR&"
-    remote_dir = input("远程目录 (默认 /home/ubuntu/): ").strip() or "/home/ubuntu/"
+    username, password = prompt_ssh_creds()
+    remote_dir = input(f"远程目录 (默认{DEFAULT_REMOTE_DIR}): ").strip() or DEFAULT_REMOTE_DIR
 
-    # 自动检测切片文件（按顺序 slice_1.txt, slice_2.txt, slice_3.txt）
+    # 自动检测切片文件（按顺序 slice_1.txt, slice_2.txt, ...）
     slice_files = []
-    for i in range(1, len(ips)+1):
-        candidate = f"slice_{i}.txt"
+    for i in range(1, len(ips) + 1):
+        candidate = _script_path(f"slice_{i}.txt")
         if os.path.exists(candidate):
             slice_files.append(candidate)
         else:
-            print(f"警告：未找到切片文件 {candidate}，请先执行菜单3生成切片")
+            print(f"警告：未找到切片文件 slice_{i}.txt")
+            print("请先执行菜单3「切片BV号」生成切片文件")
             return
 
     if len(slice_files) != len(ips):
         print(f"切片文件数量({len(slice_files)})与服务器数量({len(ips)})不匹配")
         return
 
-    # 需要上传的脚本文件（必须存在）
-    bv_fetcher_script = "bv_fetcher.py"
-    setup_script = "setup_and_run.sh"
-    if not os.path.exists(bv_fetcher_script):
-        print(f"错误：{bv_fetcher_script} 不存在，请确保该脚本在当前目录")
-        return
-    if not os.path.exists(setup_script):
-        print(f"错误：{setup_script} 不存在，请确保该脚本在当前目录")
-        return
+    # 需要上传的脚本文件
+    bv_fetcher_path = _script_path("bv_fetcher.py")
+    setup_script_path = _script_path("setup_and_run.sh")
+    for p, name in [(bv_fetcher_path, "bv_fetcher.py"), (setup_script_path, "setup_and_run.sh")]:
+        if not os.path.exists(p):
+            print(f"错误：{name} 不存在于脚本目录 {SCRIPT_DIR}")
+            return
 
     print("\n开始上传...")
     for idx, (ip, slice_file) in enumerate(zip(ips, slice_files), start=1):
         print(f"\n>>> 上传到服务器 {idx} ({ip})")
+        slice_basename = os.path.basename(slice_file)
+
         # 上传切片文件
-        remote_slice = os.path.join(remote_dir, slice_file)
         cmd_upload_slice = [
-            sys.executable, "upload.py",
+            sys.executable, _script_path(SCRIPTS["upload"]),
             "--local", slice_file,
-            "--remote", remote_slice,
+            "--remote", os.path.join(remote_dir, slice_basename),
             "--host", ip,
             "--user", username,
-            "--password", password
+            "--password", password,
         ]
         if not run_cmd(cmd_upload_slice):
-            print(f"上传 {slice_file} 失败，跳过该服务器")
+            print(f"上传 {slice_basename} 失败，跳过该服务器")
             continue
 
         # 上传 bv_fetcher.py
-        remote_script = os.path.join(remote_dir, bv_fetcher_script)
-        cmd_upload_script = [
-            sys.executable, "upload.py",
-            "--local", bv_fetcher_script,
-            "--remote", remote_script,
+        cmd_upload_bv = [
+            sys.executable, _script_path(SCRIPTS["upload"]),
+            "--local", bv_fetcher_path,
+            "--remote", os.path.join(remote_dir, "bv_fetcher.py"),
             "--host", ip,
             "--user", username,
-            "--password", password
+            "--password", password,
         ]
-        if not run_cmd(cmd_upload_script):
-            print(f"上传 {bv_fetcher_script} 失败，可能影响远程执行")
+        if not run_cmd(cmd_upload_bv):
+            print(f"上传 bv_fetcher.py 失败，可能影响远程执行")
 
         # 上传 setup_and_run.sh
-        remote_setup = os.path.join(remote_dir, setup_script)
         cmd_upload_setup = [
-            sys.executable, "upload.py",
-            "--local", setup_script,
-            "--remote", remote_setup,
+            sys.executable, _script_path(SCRIPTS["upload"]),
+            "--local", setup_script_path,
+            "--remote", os.path.join(remote_dir, "setup_and_run.sh"),
             "--host", ip,
             "--user", username,
-            "--password", password
+            "--password", password,
         ]
         if not run_cmd(cmd_upload_setup):
-            print(f"上传 {setup_script} 失败，可能影响远程执行")
+            print(f"上传 setup_and_run.sh 失败，可能影响远程执行")
 
     print("\n✅ 所有上传任务完成")
 
+
 def menu_remote_run():
-    """6. 在服务器上执行采集命令（输出命令，手动执行）"""
+    """6. 生成远程采集命令（SSH + 利用 setup_and_run.sh 一键执行）"""
     print("\n▶ 远程采集命令生成")
-    info_file = "instances_info.json"
-    if not os.path.exists(info_file):
-        print("未找到 instances_info.json")
+    instances = load_instances()
+    if not instances:
         return
-    with open(info_file, "r") as f:
-        data = json.load(f)
-    instances = data.get("instances", [])
+
     ips = [inst["PublicIp"] for inst in instances if inst.get("PublicIp")]
     if not ips:
         print("无公网IP")
         return
-    print("请登录各服务器手动执行以下命令（假设已上传切片文件和 bv_fetcher.py）：")
+
+    username, _ = prompt_ssh_creds()
+
+    print("\n" + "=" * 60)
+    print("请在各服务器上执行以下命令（一键安装依赖 + 采集）：")
+    print("=" * 60)
     for idx, ip in enumerate(ips, 1):
-        print(f"\n服务器 {idx} (IP {ip}):")
+        print(f"\n━━━ 服务器 {idx} (IP {ip}) ━━━")
         print(f"  ssh {username}@{ip}")
-        print(f"  cd /home/ubuntu")
-        print(f"  python3 bv_fetcher.py -i slice_{idx}.txt -o result_{idx}.xlsx --quiet")
+        print(f"  cd {DEFAULT_REMOTE_DIR}")
+        print(f"  chmod +x setup_and_run.sh")
+        print(f"  ./setup_and_run.sh slice_{idx}.txt")
+    print("\n" + "=" * 60)
+    print("💡 说明：")
+    print("  - setup_and_run.sh 会自动安装 python3 + pip + openpyxl")
+    print("  - 会在远程创建 venv 虚拟环境，避免依赖冲突")
+    print(f"  - SSH密码（如未修改）: {DEFAULT_SSH_PASS}")
+    print("  - 也可在 SSH 登录后直接复制命令执行")
+    print("=" * 60)
+
 
 def menu_download():
-    """7. 从服务器下载结果文件（识别 .xlsx 和 _failed.txt，不依赖 result 前缀）"""
+    """7. 从服务器下载结果文件（自动扫描远程目录下所有 .xlsx 和 _failed.txt）"""
     print("\n▶ 从服务器下载结果文件")
-    info_file = "instances_info.json"
-    if not os.path.exists(info_file):
-        print(f"未找到 {info_file}，请先创建服务器")
-        return
-    with open(info_file, "r") as f:
-        data = json.load(f)
-    instances = data.get("instances", [])
+    instances = load_instances()
     if not instances:
-        print("没有实例信息")
         return
 
     ips = [inst["PublicIp"] for inst in instances if inst.get("PublicIp")]
@@ -381,18 +379,17 @@ def menu_download():
         print("没有公网IP")
         return
 
-    username = input("SSH用户名 (默认ubuntu): ").strip() or "ubuntu"
-    password = input("SSH密码 (默认X#7kPm$9qL@2wR&): ").strip() or "X#7kPm$9qL@2wR&"
-    remote_dir = input("远程目录 (默认 /home/ubuntu/): ").strip() or "/home/ubuntu/"
-    local_dir = input("本地保存目录 (默认当前目录): ").strip() or "."
+    username, password = prompt_ssh_creds()
+    remote_dir = input(f"远程目录 (默认{DEFAULT_REMOTE_DIR}): ").strip() or DEFAULT_REMOTE_DIR
+    local_dir = input("本地保存目录（默认当前目录 script/）: ").strip()
+    if not local_dir:
+        local_dir = SCRIPT_DIR
 
-    # 需要匹配的文件模式
     patterns = ["*.xlsx", "*_failed.txt"]
-
     print("\n开始下载...")
+
     for idx, ip in enumerate(ips, start=1):
         print(f"\n>>> 从服务器 {idx} ({ip}) 扫描文件")
-        # 通过 SSH 列出远程目录下匹配模式的文件
         remote_files = []
         try:
             import paramiko
@@ -400,13 +397,13 @@ def menu_download():
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             ssh.connect(hostname=ip, username=username, password=password)
 
-            # 使用 find 命令匹配多个模式
-            find_cmd = f'find "{remote_dir}" -maxdepth 1 -type f \\( '
-            for i, pat in enumerate(patterns):
-                if i > 0:
-                    find_cmd += " -o "
-                find_cmd += f'-name "{pat}"'
-            find_cmd += " \\)"
+            # find with multiple -name patterns: no Python escapes needed
+            find_parts = []
+            for pat in patterns:
+                find_parts.extend(['-name', pat, '-o'])
+            find_parts.pop()  # remove trailing -o
+            cmd_parts = ['find', remote_dir, '-maxdepth', '1', '-type', 'f', '\\('] + find_parts + ['\\)']
+            find_cmd = ' '.join(cmd_parts)
             stdin, stdout, stderr = ssh.exec_command(find_cmd)
             remote_files = [line.strip() for line in stdout.readlines()]
             ssh.close()
@@ -420,43 +417,49 @@ def menu_download():
 
         print(f"  发现 {len(remote_files)} 个文件")
         for remote_path in remote_files:
-            # 调用 download.py 下载每个文件
             cmd_download = [
-                sys.executable, "download.py",
+                sys.executable, _script_path(SCRIPTS["download"]),
                 "--host", ip,
                 "--user", username,
                 "--password", password,
                 "--remote", remote_path,
-                "--local", local_dir
+                "--local", local_dir,
             ]
             print(f"  下载: {os.path.basename(remote_path)}")
             run_cmd(cmd_download)
 
-    print("\n✅ 下载完成，请检查本地目录")
+    print(f"\n✅ 下载完成，请检查目录: {local_dir}")
+
 
 def menu_merge():
-    """8. 合并结果文件（只合并当前目录下的 .xlsx 文件）"""
+    """8. 合并结果文件（扫描 SCRIPT_DIR 下 .xlsx 文件）"""
     print("\n▶ 合并多个Excel文件")
-    # 列出当前目录下所有 .xlsx 文件
-    xlsx_files = [f for f in os.listdir("..") if f.endswith(".xlsx")]
+    xlsx_files = [f for f in os.listdir(SCRIPT_DIR) if f.endswith(".xlsx")]
     if not xlsx_files:
-        print("未找到任何 .xlsx 文件")
+        print(f"未在 {SCRIPT_DIR} 中找到任何 .xlsx 文件")
         return
-    print("找到以下Excel文件:")
+
+    print(f"找到以下Excel文件（目录: {SCRIPT_DIR}）:")
     for i, f in enumerate(xlsx_files, 1):
-        print(f"  {i}. {f}")
-    selected = input("请输入要合并的文件索引（用空格分隔，默认全部）: ").strip()
+        size = os.path.getsize(os.path.join(SCRIPT_DIR, f))
+        print(f"  {i}. {f} ({size / 1024:.1f} KB)")
+
+    selected = input("请输入要合并的文件序号（用空格分隔，默认全部）: ").strip()
     if selected:
-        idxs = [int(x)-1 for x in selected.split() if x.isdigit()]
-        files_to_merge = [xlsx_files[i] for i in idxs if i < len(xlsx_files)]
+        idxs = [int(x) - 1 for x in selected.split() if x.isdigit()]
+        files_to_merge = [os.path.join(SCRIPT_DIR, xlsx_files[i]) for i in idxs if i < len(xlsx_files)]
     else:
-        files_to_merge = xlsx_files
+        files_to_merge = [os.path.join(SCRIPT_DIR, f) for f in xlsx_files]
+
     if not files_to_merge:
         print("未选择任何文件")
         return
+
     out_name = input("输出文件名 (默认merged_result.xlsx): ").strip()
     out_name = out_name if out_name else "merged_result.xlsx"
-    merge_result_files(files_to_merge, out_name)
+    out_path = os.path.join(SCRIPT_DIR, out_name)
+    merge_result_files(files_to_merge, out_path)
+
 
 def menu_score():
     """9. 计算得分（score_diff.py）"""
@@ -475,6 +478,7 @@ def menu_score():
         cmd.extend(["-o", out])
     run_cmd(cmd)
 
+
 def menu_delete_instances():
     """10. 删除实例"""
     print("\n▶ 删除腾讯云实例")
@@ -484,28 +488,37 @@ def menu_delete_instances():
         return
     run_cmd([sys.executable, SCRIPTS["check_instance"]])
 
+
 def menu_exit():
     print("退出程序")
     sys.exit(0)
 
+
 # ---------- 主菜单 ----------
 def main():
+    print(f"\n📁 脚本目录: {SCRIPT_DIR}")
+    print(f"📁 实例信息: {INSTANCES_INFO}")
+    print(f"📁 默认数据库: {DEFAULT_SOURCE_DB}")
+    print(f"📂 工作空间: 所有生成的文件位于脚本目录下")
+
     while True:
         print("\n" + "=" * 50)
-        print("周刊工作流管理程序")
+        print("         周刊工作流管理程序")
         print("=" * 50)
-        print("1. 采集视频 ")
-        print("2. 筛选视频 ")
-        print("3. 切片BV号 ")
-        print("4. 创建云服务器 ")
-        print("5. 上传数据到服务器")
-        print("6. 生成远程采集命令")
-        print("7. 下载服务器结果")
-        print("8. 合并结果文件")
-        print("9. 计算得分")
-        print("10. 删除所有服务器")
-        print("0. 退出")
+        print(" 1.  采集视频")
+        print(" 2.  筛选视频")
+        print(" 3.  切片BV号")
+        print(" 4.  创建云服务器")
+        print(" 5.  上传数据到服务器")
+        print(" 6.  生成远程采集命令")
+        print(" 7.  下载服务器结果")
+        print(" 8.  合并结果文件")
+        print(" 9.  计算得分")
+        print("10.  删除所有服务器")
+        print(" 0.  退出")
+        print("-" * 50)
         choice = input("请选择操作: ").strip()
+
         if choice == "1":
             menu_crawl_to_db()
         elif choice == "2":
@@ -529,7 +542,7 @@ def main():
         elif choice == "0":
             menu_exit()
         else:
-            print("无效选项，请重新输入")
+            print("❌ 无效选项，请输入 0-10 之间的数字")
         input("\n按回车键继续...")
 
 if __name__ == "__main__":
