@@ -26,7 +26,8 @@ from typing import List, Dict, Optional
 
 # ---------- 全局配置 ----------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
+WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
 # 脚本路径（确保与 main.py 同目录）
 SCRIPTS = {
     "crawl_db": "crawl_to_db.py",
@@ -44,10 +45,10 @@ SCRIPTS = {
 def _script_path(*parts: str) -> str:
     return os.path.join(SCRIPT_DIR, *parts)
 
-INSTANCES_INFO = _script_path("instances_info.json")
-DEFAULT_SOURCE_DB = _script_path("bilibili_videos.db")
-DEFAULT_FILTERED_DB = _script_path("filtered_videos.db")
-DEFAULT_SLICE_PREFIX = "slice_"
+INSTANCES_INFO = os.path.join(WORKSPACE_DIR, "instances_info.json")
+DEFAULT_SOURCE_DB = os.path.join(WORKSPACE_DIR, "bilibili_videos.db")
+DEFAULT_FILTERED_DB = os.path.join(WORKSPACE_DIR, "filtered_videos.db")
+DEFAULT_SLICE_PREFIX = os.path.join(WORKSPACE_DIR, "slice_")
 
 # SSH 默认凭据（与 startserver.py 中 LoginSettings.Password 一致）
 DEFAULT_SSH_USER = "ubuntu"
@@ -76,8 +77,8 @@ def prompt_ssh_creds() -> tuple:
     return user, pwd
 
 
-def load_instances() -> list:
-    """从 instances_info.json 加载实例列表，返回 [{PublicIp, InstanceId, ...}]"""
+def load_instances():
+    """从 workspace 加载实例信息"""
     if not os.path.exists(INSTANCES_INFO):
         print(f"未找到实例信息文件: {INSTANCES_INFO}")
         print("请先执行菜单4「创建云服务器」")
@@ -119,7 +120,7 @@ def get_bv_list_from_db(db_path: str) -> List[str]:
 
 
 def slice_bvids(bvids: List[str], num_slices: int, output_prefix: str) -> List[str]:
-    """将 BV 号列表平分为 num_slices 份，生成 txt 文件，返回文件路径列表"""
+    """将 BV 号列表平分为 num_slices 份，生成 txt 文件到 workspace，返回文件路径列表"""
     total = len(bvids)
     if total == 0:
         print("没有 BV 号可切片")
@@ -132,7 +133,7 @@ def slice_bvids(bvids: List[str], num_slices: int, output_prefix: str) -> List[s
         end = start + slice_size + (1 if i < remainder else 0)
         slice_bv = bvids[start:end]
         fname = f"{output_prefix}{i+1}.txt"
-        full_path = os.path.join(SCRIPT_DIR, fname)
+        full_path = os.path.join(WORKSPACE_DIR, fname)
         with open(full_path, "w", encoding="utf-8") as f:
             f.write("\n".join(slice_bv))
         files.append(fname)
@@ -142,7 +143,7 @@ def slice_bvids(bvids: List[str], num_slices: int, output_prefix: str) -> List[s
 
 
 def merge_result_files(result_files: List[str], output_path: str):
-    """合并多个 bv_fetcher 生成的 Excel/CSV/JSON 文件，去重保留最新"""
+    """合并多个结果文件，output_path 应指向 workspace"""
     if not result_files:
         print("没有结果文件可合并")
         return
@@ -213,7 +214,13 @@ def menu_filter():
     max_sec = input("最大时长(秒，默认420): ").strip()
     max_sec = max_sec if max_sec else "420"
     blacklist = input("黑名单文件 (默认blacklist.txt): ").strip()
-    blacklist = blacklist if blacklist else "blacklist.txt"
+    if blacklist:
+        # 如果用户输入了文件名，转换为 workspace 下的绝对路径
+        if not os.path.isabs(blacklist):
+            blacklist = os.path.join(WORKSPACE_DIR, blacklist)
+    else:
+        blacklist = os.path.join(WORKSPACE_DIR, "blacklist.txt")
+
     cmd = [sys.executable, SCRIPTS["filter"], "--min", min_sec, "--max", max_sec, "--blacklist", blacklist]
     run_cmd(cmd)
 
@@ -232,7 +239,10 @@ def menu_slice():
     slices = input("请输入切割份数 (默认3): ").strip()
     slices = int(slices) if slices.isdigit() else 3
     prefix = input(f"输出文件前缀 (默认{DEFAULT_SLICE_PREFIX}): ").strip()
-    prefix = prefix if prefix else DEFAULT_SLICE_PREFIX
+    if not prefix:
+        prefix = DEFAULT_SLICE_PREFIX
+    if not os.path.isabs(prefix):
+        prefix = os.path.join(WORKSPACE_DIR, prefix)
     files = slice_bvids(bvids, slices, prefix)
     print(f"\n已生成 {len(files)} 个切片文件:")
     for f in files:
@@ -270,7 +280,7 @@ def menu_upload():
     # 自动检测切片文件（按顺序 slice_1.txt, slice_2.txt, ...）
     slice_files = []
     for i in range(1, len(ips) + 1):
-        candidate = _script_path(f"slice_{i}.txt")
+        candidate = os.path.join(WORKSPACE_DIR, f"slice_{i}.txt")
         if os.path.exists(candidate):
             slice_files.append(candidate)
         else:
@@ -283,8 +293,8 @@ def menu_upload():
         return
 
     # 需要上传的脚本文件
-    bv_fetcher_path = _script_path("bv_fetcher.py")
-    setup_script_path = _script_path("setup_and_run.sh")
+    bv_fetcher_path = os.path.join(SCRIPT_DIR, "bv_fetcher.py")
+    setup_script_path = os.path.join(SCRIPT_DIR, "setup_and_run.sh")
     for p, name in [(bv_fetcher_path, "bv_fetcher.py"), (setup_script_path, "setup_and_run.sh")]:
         if not os.path.exists(p):
             print(f"错误：{name} 不存在于脚本目录 {SCRIPT_DIR}")
@@ -381,9 +391,9 @@ def menu_download():
 
     username, password = prompt_ssh_creds()
     remote_dir = input(f"远程目录 (默认{DEFAULT_REMOTE_DIR}): ").strip() or DEFAULT_REMOTE_DIR
-    local_dir = input("本地保存目录（默认当前目录 script/）: ").strip()
+    local_dir = input(f"本地保存目录（默认{WORKSPACE_DIR}）: ").strip()
     if not local_dir:
-        local_dir = SCRIPT_DIR
+        local_dir = WORKSPACE_DIR
 
     patterns = ["*.xlsx", "*_failed.txt"]
     print("\n开始下载...")
@@ -434,22 +444,22 @@ def menu_download():
 def menu_merge():
     """8. 合并结果文件（扫描 SCRIPT_DIR 下 .xlsx 文件）"""
     print("\n▶ 合并多个Excel文件")
-    xlsx_files = [f for f in os.listdir(SCRIPT_DIR) if f.endswith(".xlsx")]
+    xlsx_files = [f for f in os.listdir(WORKSPACE_DIR) if f.endswith(".xlsx")]
     if not xlsx_files:
-        print(f"未在 {SCRIPT_DIR} 中找到任何 .xlsx 文件")
+        print(f"未在 {WORKSPACE_DIR} 中找到任何 .xlsx 文件")
         return
 
-    print(f"找到以下Excel文件（目录: {SCRIPT_DIR}）:")
+    print(f"找到以下Excel文件（目录: {WORKSPACE_DIR}）:")
     for i, f in enumerate(xlsx_files, 1):
-        size = os.path.getsize(os.path.join(SCRIPT_DIR, f))
+        size = os.path.getsize(os.path.join(WORKSPACE_DIR, f))
         print(f"  {i}. {f} ({size / 1024:.1f} KB)")
 
     selected = input("请输入要合并的文件序号（用空格分隔，默认全部）: ").strip()
     if selected:
         idxs = [int(x) - 1 for x in selected.split() if x.isdigit()]
-        files_to_merge = [os.path.join(SCRIPT_DIR, xlsx_files[i]) for i in idxs if i < len(xlsx_files)]
+        files_to_merge = [os.path.join(WORKSPACE_DIR, xlsx_files[i]) for i in idxs if i < len(xlsx_files)]
     else:
-        files_to_merge = [os.path.join(SCRIPT_DIR, f) for f in xlsx_files]
+        files_to_merge = [os.path.join(WORKSPACE_DIR, f) for f in xlsx_files]
 
     if not files_to_merge:
         print("未选择任何文件")
@@ -457,7 +467,7 @@ def menu_merge():
 
     out_name = input("输出文件名 (默认merged_result.xlsx): ").strip()
     out_name = out_name if out_name else "merged_result.xlsx"
-    out_path = os.path.join(SCRIPT_DIR, out_name)
+    out_path = os.path.join(WORKSPACE_DIR, out_name)
     merge_result_files(files_to_merge, out_path)
 
 
@@ -465,16 +475,24 @@ def menu_score():
     """9. 计算得分（score_diff.py）"""
     print("\n▶ 计算增量得分")
     file1 = input("第一个时间点文件 (旧): ").strip()
+    # 如果用户输入的是相对路径，自动补全 workspace
+    if not os.path.isabs(file1):
+        file1 = os.path.join(WORKSPACE_DIR, file1)
     if not os.path.exists(file1):
         print("文件不存在")
         return
     file2 = input("第二个时间点文件 (新): ").strip()
+    if not os.path.isabs(file2):
+        file2 = os.path.join(WORKSPACE_DIR, file2)
     if not os.path.exists(file2):
         print("文件不存在")
         return
     out = input("输出文件 (默认自动生成): ").strip()
+    # 输出文件也放在 workspace
     cmd = [sys.executable, SCRIPTS["score_diff"], file1, file2]
     if out:
+        if not os.path.isabs(out):
+            out = os.path.join(WORKSPACE_DIR, out)
         cmd.extend(["-o", out])
     run_cmd(cmd)
 

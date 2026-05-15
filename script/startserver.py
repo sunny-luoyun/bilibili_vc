@@ -11,8 +11,12 @@ from tencentcloud.common.profile.http_profile import HttpProfile
 from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
 from tencentcloud.cvm.v20170312 import cvm_client, models
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
+
 def load_credentials_from_json():
-    """从同目录下的 credentials.json 读取密钥"""
+    """从同目录下的 credentials.json 读取密钥（仍在 script 目录）"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     json_path = os.path.join(script_dir, "credentials.json")
     if not os.path.exists(json_path):
@@ -91,8 +95,7 @@ def save_instance_info(instance_list, filename="instances_info.json"):
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "instances": instance_list
     }
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(script_dir, filename)
+    filepath = os.path.join(WORKSPACE_DIR, filename)
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=4, ensure_ascii=False)
     print(f"\n实例信息已保存至：{filepath}")

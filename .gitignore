@@ -5,3 +5,4 @@
 *.json
 /script/instances_info.json.bak
 /script/instances_info.json.bak
+/workspace/instances_info.json.bak

@@ -36,7 +36,10 @@ _SSL_CTX = ssl._create_unverified_context()
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-
+# ========== 工作目录 ==========
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
 # ============================================================
 # 配置
 # ============================================================
@@ -429,9 +432,12 @@ def main():
 
     if args.output is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M")
-        input_path = os.path.abspath(args.input)
+        # 默认输出到 workspace 目录
         out_filename = f"{ts}.xlsx"
-        args.output = os.path.join(os.path.dirname(input_path), out_filename)
+        args.output = os.path.join(WORKSPACE_DIR, out_filename)
+    else:
+        # 如果用户指定了相对路径，依然基于当前工作目录，不做强制转换
+        pass
 
     print()
     print(" ╔══════════════════════════════════════╗")

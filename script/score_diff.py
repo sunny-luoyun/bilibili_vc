@@ -27,6 +27,9 @@ import math
 from pathlib import Path
 from typing import Dict, List, Optional
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
 # ---------- 文件读取 ----------
 def load_data(path: str) -> Dict[str, dict]:
     """读取 bv_fetcher 输出的文件，返回 {bvid: 原始数据字典}"""
@@ -192,7 +195,7 @@ def main():
     parser.add_argument(
         "-o", "--output",
         default=None,
-        help="输出文件路径（默认自动生成：时间点A-时间点B.xlsx）",
+        help="输出文件路径（默认自动生成：时间点A-时间点B.xlsx，放在 workspace 目录）",
     )
     args = parser.parse_args()
 
@@ -201,8 +204,9 @@ def main():
         name1 = Path(args.file1).stem
         name2 = Path(args.file2).stem
         out_name = f"{name1}-{name2}.xlsx"
+        out_path = os.path.join(WORKSPACE_DIR, out_name)
     else:
-        out_name = args.output
+        out_path = args.output
 
     print(f"读取文件1: {args.file1}")
     data1 = load_data(args.file1)

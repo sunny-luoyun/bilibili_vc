@@ -28,6 +28,9 @@ import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
 # ========== 切片模式 ==========
 def slice_db_to_files(source_db: str, slice_prefix: str = "slice_"):
     """
@@ -49,32 +52,31 @@ def slice_db_to_files(source_db: str, slice_prefix: str = "slice_"):
         print("未找到任何 BV 号，退出")
         sys.exit(1)
 
-    # 均分为 3 份
     size = total // 3
     parts = [
         bvids[0:size],
-        bvids[size:2*size],
-        bvids[2*size:]
+        bvids[size:2 * size],
+        bvids[2 * size:]
     ]
-    # 确保第三份包含所有剩余
-    if len(parts[2]) < total - 2*size:
-        parts[2] = bvids[2*size:]
+    if len(parts[2]) < total - 2 * size:
+        parts[2] = bvids[2 * size:]
 
     print(f"总 BV 数：{total}，分为 3 组：{len(parts[0])} / {len(parts[1])} / {len(parts[2])}")
 
     slice_files = []
     for i, bv_group in enumerate(parts):
         fname = f"{slice_prefix}{i}.txt"
-        with open(fname, "w", encoding="utf-8") as f:
+        full_path = os.path.join(WORKSPACE_DIR, fname)
+        with open(full_path, "w", encoding="utf-8") as f:
             for bv in bv_group:
                 f.write(bv + "\n")
-        slice_files.append(fname)
-        print(f"已生成切片文件：{fname}")
+        slice_files.append(full_path)
+        print(f"已生成切片文件：{full_path}")
 
     print("\n===== 请在每台服务器上分别执行以下命令 =====")
-    for i, fname in enumerate(slice_files):
-        cmd = f"python bv_fetcher.py -i {fname} -o result_slice_{i}.xlsx"
-        print(f"服务器 {i+1}：{cmd}")
+    for i, fpath in enumerate(slice_files):
+        cmd = f"python bv_fetcher.py -i {os.path.basename(fpath)} -o result_slice_{i}.xlsx"
+        print(f"服务器 {i + 1}：{cmd}")
     print("==========================================\n")
     return slice_files
 
@@ -125,8 +127,8 @@ def merge_results(result_files: List[str], output_path: str):
     merged = {}
     for fpath in result_files:
         print(f"读取：{fpath}")
-        data = load_data_from_file(fpath)
-        merged.update(data)          # 后出现的会覆盖前面的，符合预期
+        data = load_data_from_file(fpath)  # load_data_from_file 需要支持绝对路径
+        merged.update(data)
         print(f"  添加 {len(data)} 条记录")
 
     records = list(merged.values())
@@ -177,7 +179,7 @@ def run_local_parallel(source_db: str, final_output: str, workers: int = 3, run_
       4. (可选) 调用 score_diff.py
     """
     # 1. 切片
-    prefix = f"_temp_slice_"
+    prefix = os.path.join(WORKSPACE_DIR, "_temp_slice_")
     slice_files = slice_db_to_files(source_db, slice_prefix=prefix)
     output_parts = [f"{prefix}{i}_out.xlsx" for i in range(workers)]
 
@@ -228,20 +230,23 @@ def run_local_parallel(source_db: str, final_output: str, workers: int = 3, run_
 # ========== 主入口 ==========
 def main():
     parser = argparse.ArgumentParser(description="BV 号数据库切片、合并与并行采集辅助工具")
-    parser.add_argument("--mode", choices=["slice", "merge", "auto"], required=True,
-                        help="slice: 仅切片生成文件；merge: 合并三个结果；auto: 本地自动切片+并行采集+合并")
-    parser.add_argument("--source", type=str, default="filtered_videos.db",
-                        help="源 SQLite 数据库（默认 filtered_videos.db）")
-    parser.add_argument("--slice-prefix", type=str, default="slice_",
-                        help="切片文件前缀（默认 slice_）")
+    parser.add_argument("--mode", choices=["slice", "merge", "auto"], required=True)
+    parser.add_argument("--source", type=str, default=os.path.join(WORKSPACE_DIR, "filtered_videos.db"),
+                        help="源 SQLite 数据库")
+    parser.add_argument("--slice-prefix", type=str, default="slice_", help="切片文件前缀")
     parser.add_argument("--result1", type=str, help="服务器1的结果文件")
     parser.add_argument("--result2", type=str, help="服务器2的结果文件")
     parser.add_argument("--result3", type=str, help="服务器3的结果文件")
-    parser.add_argument("--out", "--output", type=str, default="merged_result.xlsx",
+    parser.add_argument("--out", "--output", type=str, default=os.path.join(WORKSPACE_DIR, "merged_result.xlsx"),
                         help="合并后的输出文件路径")
     parser.add_argument("--second-file", type=str, help="用于 score_diff 的上一个时间点文件")
     parser.add_argument("--run-score-diff", action="store_true", help="自动模式下，合并后直接运行 score_diff.py")
     args = parser.parse_args()
+
+    for r in ["result1", "result2", "result3"]:
+        val = getattr(args, r, None)
+        if val and not os.path.isabs(val):
+            setattr(args, r, os.path.join(WORKSPACE_DIR, val))
 
     if args.mode == "slice":
         slice_db_to_files(args.source, args.slice_prefix)

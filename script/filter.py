@@ -19,8 +19,11 @@ import argparse
 import re
 import shutil
 
-DEFAULT_SOURCE_DB = "bilibili_videos.db"
-DEFAULT_TARGET_DB = "filtered_videos.db"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
+DEFAULT_SOURCE_DB = os.path.join(WORKSPACE_DIR, "bilibili_videos.db")
+DEFAULT_TARGET_DB = os.path.join(WORKSPACE_DIR, "filtered_videos.db")
 DEFAULT_MIN_SEC = 120      # 大于 2 分钟
 DEFAULT_MAX_SEC = 420     # 小于 7 分钟
 KEYWORDS = [
@@ -236,7 +239,7 @@ def main():
     parser.add_argument("--target", default=DEFAULT_TARGET_DB)
     parser.add_argument("--min", type=int, default=DEFAULT_MIN_SEC)
     parser.add_argument("--max", type=int, default=DEFAULT_MAX_SEC)
-    parser.add_argument("--blacklist", default="blacklist.txt")
+    parser.add_argument("--blacklist", default=os.path.join(WORKSPACE_DIR, "blacklist.txt"))
     parser.add_argument("--previous-db", default=None)
     args = parser.parse_args()
     filter_videos(args.source, args.target, args.min, args.max,

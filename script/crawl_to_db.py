@@ -18,12 +18,14 @@ import sqlite3
 import argparse
 from typing import Optional
 from dataclasses import asdict
-
-# 导入现有模块（请确保 bilibili_search.py 在同一目录）
 from bilibili_search import BilibiliClient, VideoInfo, PARTITION_MAP
 
-DB_FILE = "bilibili_videos.db"
-PROGRESS_FILE = "crawl_progress.json"
+# ========== 工作目录 ==========
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
+DB_FILE = os.path.join(WORKSPACE_DIR, "bilibili_videos.db")
+PROGRESS_FILE = os.path.join(WORKSPACE_DIR, "crawl_progress.json")
 DEFAULT_TID = 30
 MIN_INTERVAL = 3.5          # 每秒约 0.28 次，即每分钟约 17 次，远低于 20 次限制
 MAX_RETRY_412 = 3           # 412 错误最大重试次数
@@ -329,9 +331,9 @@ def main():
                         choices=["pubdate", "click", "stow", "coin", "dm", "likes"],
                         help="排序方式（默认 pubdate）")
     parser.add_argument("--db", type=str, default=DB_FILE,
-                        help="SQLite 数据库文件路径")
+                        help=f"SQLite 数据库文件路径（默认 workspace）")
     parser.add_argument("--progress", type=str, default=PROGRESS_FILE,
-                        help="进度文件路径（仅在固定页码模式下使用）")
+                        help="进度文件路径（默认 workspace）")
     parser.add_argument("--no-resume", action="store_true", default=False,
                         help="忽略历史进度（仅在固定页码模式下有效）")
     parser.add_argument("--since", type=str, default=None,

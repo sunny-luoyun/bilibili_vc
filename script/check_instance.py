@@ -9,6 +9,11 @@ from tencentcloud.common.profile.http_profile import HttpProfile
 from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
 from tencentcloud.cvm.v20170312 import cvm_client, models
 
+# ========== 工作目录 ==========
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
+
 def load_credentials_from_json():
     """从同目录下的 credentials.json 读取密钥"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,9 +29,8 @@ def load_credentials_from_json():
     return secret_id, secret_key
 
 def load_instance_ids_from_json(filename="instances_info.json"):
-    """读取之前保存的实例信息，返回实例ID列表"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    filepath = os.path.join(script_dir, filename)
+    """读取之前保存的实例信息，返回实例ID列表（从 workspace 读取）"""
+    filepath = os.path.join(WORKSPACE_DIR, filename)
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"未找到实例信息文件：{filepath}\n请先运行 startserver.py 创建实例。")
     with open(filepath, "r", encoding="utf-8") as f:
@@ -57,7 +61,6 @@ def main():
         clientProfile.httpProfile = httpProfile
         client = cvm_client.CvmClient(cred, "ap-nanjing", clientProfile)
 
-        # 读取需要删除的实例ID
         instance_ids, json_file = load_instance_ids_from_json()
         print(f"准备删除以下实例：{instance_ids}")
 
@@ -66,11 +69,9 @@ def main():
             print("操作已取消。")
             return
 
-        # 执行删除
         resp = delete_instances(client, instance_ids)
         print(f"删除请求已发送，RequestId: {resp.RequestId}")
 
-        # 删除成功后移除JSON文件（备份可选）
         backup = json_file + ".bak"
         if os.path.exists(json_file):
             os.rename(json_file, backup)
