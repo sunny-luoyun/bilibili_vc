@@ -58,7 +58,6 @@ bilibili_vc/
 │   └── *_failed.txt                 #   采集中失败的 BV 号
 │
 ├── .gitignore
-├── LICENSE
 └── README.md
 ```
 
@@ -181,11 +180,6 @@ KEYWORDS = [
 - [BilibiliAPIDocs](https://github.com/fython/BilibiliAPIDocs) — B 站 API 文档参考
 - [寒棠 Daily](https://github.com/hantang-daily) — 批量采集器实现思路参考
 
----
-
-## 📄 许可证
-
-[MIT](LICENSE)
 
 ---
 
