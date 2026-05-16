@@ -37,9 +37,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 # ========== 工作目录 ==========
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
-os.makedirs(WORKSPACE_DIR, exist_ok=True)
+WORKSPACE_DIR = os.getcwd()
 # ============================================================
 # 配置
 # ============================================================
@@ -432,7 +430,6 @@ def main():
 
     if args.output is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M")
-        # 默认输出到 workspace 目录
         out_filename = f"{ts}.xlsx"
         args.output = os.path.join(WORKSPACE_DIR, out_filename)
     else:

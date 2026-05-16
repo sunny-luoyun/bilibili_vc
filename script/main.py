@@ -475,7 +475,6 @@ def menu_score():
     """9. 计算得分（score_diff.py）"""
     print("\n▶ 计算增量得分")
     file1 = input("第一个时间点文件 (旧): ").strip()
-    # 如果用户输入的是相对路径，自动补全 workspace
     if not os.path.isabs(file1):
         file1 = os.path.join(WORKSPACE_DIR, file1)
     if not os.path.exists(file1):
@@ -488,11 +487,12 @@ def menu_score():
         print("文件不存在")
         return
     out = input("输出文件 (默认自动生成): ").strip()
-    # 输出文件也放在 workspace
     cmd = [sys.executable, SCRIPTS["score_diff"], file1, file2]
     if out:
         if not os.path.isabs(out):
-            out = os.path.join(WORKSPACE_DIR, out)
+            SCORE_DIR = os.path.join(SCRIPT_DIR, "..", "score")
+            os.makedirs(SCORE_DIR, exist_ok=True)
+            out = os.path.join(SCORE_DIR, out)
         cmd.extend(["-o", out])
     run_cmd(cmd)
 

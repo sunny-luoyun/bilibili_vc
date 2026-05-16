@@ -28,8 +28,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
-os.makedirs(WORKSPACE_DIR, exist_ok=True)
+SCORE_DIR = os.path.join(SCRIPT_DIR, "..", "score")
+os.makedirs(SCORE_DIR, exist_ok=True)
 # ---------- 文件读取 ----------
 def load_data(path: str) -> Dict[str, dict]:
     """读取 bv_fetcher 输出的文件，返回 {bvid: 原始数据字典}"""
@@ -204,7 +204,7 @@ def main():
         name1 = Path(args.file1).stem
         name2 = Path(args.file2).stem
         out_name = f"{name1}-{name2}.xlsx"
-        out_path = os.path.join(WORKSPACE_DIR, out_name)
+        out_path = os.path.join(SCORE_DIR, out_name)
     else:
         out_path = args.output
 
@@ -319,8 +319,8 @@ def main():
         ws.append(headers)
         for r in results:
             ws.append([r.get(h, "") for h in headers])
-        wb.save(out_name)
-        print(f"\n已保存结果至: {out_name}  ({len(results)} 条记录)")
+        wb.save(out_path)
+        print(f"\n已保存结果至: {out_path}  ({len(results)} 条记录)")
     else:
         print("无有效数据可保存。")
 
