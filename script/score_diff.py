@@ -225,6 +225,14 @@ def main():
     print(f"两个时间点共有的 BV 数量: {len(common)}")
     print(f"总计参与计算: {len(all_bvids)} 条")
 
+    matched_delta_view = 0
+    for bvid in all_bvids:
+        v2 = safe_float(data2[bvid].get("view", 0))
+        v1 = safe_float(data1[bvid].get("view", 0)) if bvid in data1 else 0.0
+        matched_delta_view += v2 - v1
+    total_view_2 = sum(safe_float(r.get("view", 0)) for r in data2.values())
+    print(f"播放增量: {int(matched_delta_view):+}")
+
     if not all_bvids:
         print("第二个文件中无任何 BV 号，无法计算。")
         return
