@@ -221,8 +221,8 @@ def main():
     only_in_2 = all_bvids - set(data1.keys())
     common = all_bvids & set(data1.keys())
 
-    print(f"仅在时间点2新增的 BV 数量: {len(only_in_2)}")
-    print(f"两个时间点共有的 BV 数量: {len(common)}")
+    # print(f"仅在时间点2新增的 BV 数量: {len(only_in_2)}")
+    # print(f"两个时间点共有的 BV 数量: {len(common)}")
     print(f"总计参与计算: {len(all_bvids)} 条")
 
     matched_delta_view = 0
