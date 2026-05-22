@@ -25,6 +25,7 @@
 3. **🚀 批量采集** — 多线程并发获取 BV 号的完整播放数据
 4. **☁️ 云端分发** — 切片分发到云服务器并行采集，加速大规模数据处理
 5. **📊 增量算分** — 对比两个时间点数据，多维修正公式计算综合得分
+6. **⭐ 自动收藏** — 将算分结果前 N 个视频一键加入 B站收藏夹
 
 ---
 
@@ -39,6 +40,7 @@ bilibili_vc/
 │   ├── bv_fetcher.py                #   批量采集器：多线程并发获取数据
 │   ├── slice_and_merge.py           #   切片 & 合并：BV 号分布 + 结果归并
 │   ├── score_diff.py                #   增量算分器：两时间点对比 → 综合得分
+│   ├── add_to_fav.py                #   B站收藏夹工具：算分结果加入收藏夹
 │   ├── main.py                      #   交互式工作流总控
 │   ├── startserver.py               #   腾讯云 CVM 实例创建
 │   ├── check_instance.py            #   腾讯云 CVM 检查/销毁
@@ -55,7 +57,8 @@ bilibili_vc/
 │   ├── blacklist.txt                #   BV 号黑名单
 │   ├── slice_*.txt                  #   切片后的 BV 号列表
 │   ├── result_*.xlsx                #   批量采集结果
-│   └── *_failed.txt                 #   采集中失败的 BV 号
+│   ├── *_failed.txt                 #   采集中失败的 BV 号
+│   └── bilibili_cookies.json        #   B站登录 Cookie（首次收藏时生成）
 │
 ├── .gitignore
 └── README.md
@@ -101,6 +104,7 @@ python main.py
  8.  合并结果文件          # 内置合并
  9.  计算得分             # score_diff.py
 10.  删除所有服务器        # check_instance.py
+11.  算分结果加入收藏夹    # add_to_fav.py
  0.  退出
 ```
 
@@ -152,6 +156,29 @@ KEYWORDS = [
 | 采集结果 | `workspace/result_*.xlsx` | 批量采集结果 |
 | 失败记录 | `workspace/*_failed.txt` | 批量采集中失败的 BV 号 |
 | 密钥文件 | `./credentials.json` | 腾讯云 API 密钥（需自行创建） |
+| Cookie 文件 | `workspace/bilibili_cookies.json` | 自动收藏功能生成的 B站登录凭证 |
+
+---
+
+## ⭐ 自动收藏
+
+将算分结果中的高分视频一键加入你的 B站收藏夹。
+
+```bash
+# 命令行直接使用
+python script/add_to_fav.py score/20260513_14-20260516_09.xlsx --top 10
+
+# 或通过交互菜单（选 11）
+python script/main.py
+```
+
+**首次使用**需要提供 B站 Cookie（`SESSDATA` + `bili_jct`）：
+1. 浏览器登录 [bilibili.com](https://www.bilibili.com)
+2. 按 `F12` → **Application** → Cookies → `https://www.bilibili.com`
+3. 复制 `SESSDATA`、`bili_jct` 和 `DedeUserID` 的值
+4. 粘贴到终端提示中，脚本会自动保存到 `workspace/bilibili_cookies.json`（后续复用）
+
+**流程：** 选择算分文件 → 输入前 N 名数量 → 输入收藏夹名称（自动新建）→ 逐个添加到收藏夹 → 输出成功/失败列表
 
 ---
 

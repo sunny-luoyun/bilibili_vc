@@ -39,6 +39,7 @@ SCRIPTS = {
     "download": "download.py",
     "score_diff": "score_diff.py",
     "bv_fetcher": "bv_fetcher.py",
+    "add_to_fav": "add_to_fav.py",
 }
 
 # 默认文件名（始终基于 SCRIPT_DIR 拼出完整路径，避免 CWD 不确定）
@@ -497,6 +498,28 @@ def menu_score():
     run_cmd(cmd)
 
 
+def menu_add_to_fav():
+    """11. 将算分结果前 N 个视频加入收藏夹"""
+    print("\n▶ 将算分结果加入B站收藏夹")
+    score_files = [f for f in os.listdir(os.path.join(SCRIPT_DIR, "..", "score")) if f.endswith(".xlsx")]
+    if not score_files:
+        print(f"score/ 目录下没有算分文件，请先运行「9. 计算得分」")
+        return
+    print("可用算分文件:")
+    for i, f in enumerate(score_files, 1):
+        size = os.path.getsize(os.path.join(SCRIPT_DIR, "..", "score", f))
+        print(f"  {i}. {f} ({size / 1024:.1f} KB)")
+    sel = input("请选择 (输入序号): ").strip()
+    if not sel.isdigit() or not (1 <= int(sel) <= len(score_files)):
+        print("无效选择")
+        return
+    fpath = os.path.join(SCRIPT_DIR, "..", "score", score_files[int(sel) - 1])
+    top_n = input("要收藏前几个视频? (默认 10): ").strip()
+    top_n = top_n if top_n else "10"
+    cmd = [sys.executable, SCRIPTS["add_to_fav"], fpath, "--top", top_n]
+    run_cmd(cmd)
+
+
 def menu_delete_instances():
     """10. 删除实例"""
     print("\n▶ 删除腾讯云实例")
@@ -533,6 +556,7 @@ def main():
         print(" 8.  合并结果文件")
         print(" 9.  计算得分")
         print("10.  删除所有服务器")
+        print("11.  算分结果加入收藏夹")
         print(" 0.  退出")
         print("-" * 50)
         choice = input("请选择操作: ").strip()
@@ -557,10 +581,12 @@ def main():
             menu_score()
         elif choice == "10":
             menu_delete_instances()
+        elif choice == "11":
+            menu_add_to_fav()
         elif choice == "0":
             menu_exit()
         else:
-            print("❌ 无效选项，请输入 0-10 之间的数字")
+            print("❌ 无效选项，请输入 0-11 之间的数字")
         input("\n按回车键继续...")
 
 if __name__ == "__main__":
