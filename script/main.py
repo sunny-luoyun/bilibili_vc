@@ -40,6 +40,8 @@ SCRIPTS = {
     "score_diff": "score_diff.py",
     "bv_fetcher": "bv_fetcher.py",
     "add_to_fav": "add_to_fav.py",
+    "download_mp3": "download_mp3.py",
+    "ncm_delete": "ncm_delete.py",
 }
 
 # 默认文件名（始终基于 SCRIPT_DIR 拼出完整路径，避免 CWD 不确定）
@@ -530,6 +532,38 @@ def menu_delete_instances():
     run_cmd([sys.executable, SCRIPTS["check_instance"]])
 
 
+def menu_download_mp3():
+    """12. 下载MP3并上传网易云云盘"""
+    print("\n▶ 下载算分结果前N个视频的MP3 → 上传网易云云盘 → 创建歌单")
+    score_files = [f for f in os.listdir(os.path.join(SCRIPT_DIR, "..", "score")) if f.endswith(".xlsx")]
+    if not score_files:
+        print(f"score/ 目录下没有算分文件，请先运行「9. 计算得分」")
+        return
+    print("可用算分文件:")
+    for i, f in enumerate(score_files, 1):
+        size = os.path.getsize(os.path.join(SCRIPT_DIR, "..", "score", f))
+        print(f"  {i}. {f} ({size / 1024:.1f} KB)")
+    sel = input("请选择 (输入序号): ").strip()
+    if not sel.isdigit() or not (1 <= int(sel) <= len(score_files)):
+        print("无效选择")
+        return
+    fpath = os.path.join(SCRIPT_DIR, "..", "score", score_files[int(sel) - 1])
+    top_n = input("要下载前几个视频? (默认 10): ").strip()
+    top_n = top_n if top_n else "10"
+    cmd = [sys.executable, SCRIPTS["download_mp3"], fpath, "--top", top_n]
+    run_cmd(cmd)
+
+
+def menu_ncm_delete():
+    """13. 删除网易云歌单和云盘音乐"""
+    print("\n▶ 删除网易云歌单和云盘音乐")
+    confirm = input("⚠️ 将删除之前同步的歌单和云盘音乐，不可逆！是否继续？(yes/no): ").strip().lower()
+    if confirm != "yes":
+        print("取消删除")
+        return
+    run_cmd([sys.executable, SCRIPTS["ncm_delete"]])
+
+
 def menu_exit():
     print("退出程序")
     sys.exit(0)
@@ -557,6 +591,8 @@ def main():
         print(" 9.  计算得分")
         print("10.  删除所有服务器")
         print("11.  算分结果加入收藏夹")
+        print("12.  下载MP3 → 上传网易云云盘 → 创建歌单")
+        print("13.  删除网易云歌单和云盘音乐")
         print(" 0.  退出")
         print("-" * 50)
         choice = input("请选择操作: ").strip()
@@ -583,10 +619,14 @@ def main():
             menu_delete_instances()
         elif choice == "11":
             menu_add_to_fav()
+        elif choice == "12":
+            menu_download_mp3()
+        elif choice == "13":
+            menu_ncm_delete()
         elif choice == "0":
             menu_exit()
         else:
-            print("❌ 无效选项，请输入 0-11 之间的数字")
+            print("❌ 无效选项，请输入 0-13 之间的数字")
         input("\n按回车键继续...")
 
 if __name__ == "__main__":

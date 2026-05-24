@@ -3,6 +3,11 @@
 *.db
 .DS_Store
 *.json
-/script/instances_info.json.bak
+!/script/netease/package.json
+!/script/netease/package-lock.json
 /script/instances_info.json.bak
 /workspace/instances_info.json.bak
+/workspace/downloaded_mp3/
+/script/netease/node_modules/
+/script/netease/.ncm_*
+/script/netease/qrcode.png
