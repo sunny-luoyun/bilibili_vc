@@ -58,34 +58,49 @@ async function main() {
 
   const history = loadHistory()
 
+  const MAX_RETRIES = 3
+  const RETRY_DELAY_MS = 3000
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+  async function uploadFile(file, rawName, cookie) {
+    const encodedName = Buffer.from(rawName, 'utf-8').toString('latin1')
+    const buf = fs.readFileSync(file)
+    const res = await cloud({
+      songFile: { name: encodedName, data: buf, size: buf.length, mimetype: 'audio/mpeg' },
+      cookie,
+    })
+    if (res.body.code === 200) {
+      history.push({ name: rawName, time: new Date().toISOString() })
+      saveHistory(history)
+      return true
+    }
+    throw { code: res.body.code, msg: res.body.msg || JSON.stringify(res.body) }
+  }
+
   for (const file of files.reverse()) {
     const rawName = path.basename(file)
-    const encodedName = Buffer.from(rawName, 'utf-8').toString('latin1')
-    const upload = async () => {
-      const buf = fs.readFileSync(file)
-      const res = await cloud({
-        songFile: { name: encodedName, data: buf, size: buf.length, mimetype: 'audio/mpeg' },
-        cookie,
-      })
-      if (res.body.code === 200) {
+    let ok = false
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        await uploadFile(file, rawName, cookie)
         console.log(`OK ${rawName}`)
-        history.push({ name: rawName, time: new Date().toISOString() })
-        saveHistory(history)
-      } else {
-        throw { code: res.body.code, msg: res.body.msg || JSON.stringify(res.body) }
-      }
-    }
-    try {
-      await upload()
-    } catch (e) {
-      if (e.code === 301) {
-        console.log('cookie 已过期，重新扫码登录...')
-        try { fs.unlinkSync(COOKIE_FILE) } catch {}
-        cookie = await qrLogin()
-        try { await upload(); console.log(`OK ${rawName}`) }
-        catch (e2) { console.log(`FAIL ${rawName}: ${e2.msg || e2.message}`) }
-      } else {
-        console.log(`FAIL ${rawName}: ${e.msg || e.message}`)
+        ok = true
+        break
+      } catch (e) {
+        if (e.code === 301) {
+          console.log('cookie 已过期，重新扫码登录...')
+          try { fs.unlinkSync(COOKIE_FILE) } catch {}
+          cookie = await qrLogin()
+          attempt = 0
+          continue
+        }
+        if (attempt < MAX_RETRIES) {
+          console.log(`RETRY ${rawName} (${attempt}/${MAX_RETRIES}): ${e.msg || e.message}`)
+          await sleep(RETRY_DELAY_MS)
+        } else {
+          console.log(`FAIL ${rawName}: ${e.msg || e.message}`)
+        }
       }
     }
   }

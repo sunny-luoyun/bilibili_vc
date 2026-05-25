@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.request
@@ -24,6 +25,7 @@ import urllib.request
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 from ncm_utils import upload_mp3s, create_playlist as ncm_create_playlist
+from extract_song_name import extract_song_name, detect_artist
 
 WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
 SCORE_DIR = os.path.join(SCRIPT_DIR, "..", "score")
@@ -51,23 +53,27 @@ def sanitize_filename(name: str, max_len: int = 40) -> str:
 
 
 def write_id3_tags(mp3_path, title, artist=""):
+    tmp_path = mp3_path + ".tmp_id3.mp3"
+    cmd = [
+        "ffmpeg", "-y", "-i", mp3_path, "-c", "copy",
+        "-map_metadata", "-1",
+        "-metadata", f"title={title}",
+    ]
+    if artist:
+        cmd += ["-metadata", f"artist={artist}"]
+    cmd.append(tmp_path)
     try:
-        from mutagen.mp3 import MP3
-        from mutagen.id3 import ID3, TIT2, TPE1
-    except ImportError:
-        return
-    try:
-        try:
-            audio = MP3(mp3_path, ID3=ID3)
-        except Exception:
-            audio = MP3(mp3_path)
-            audio.add_tags()
-        audio.tags.add(TIT2(encoding=3, text=title))
-        if artist:
-            audio.tags.add(TPE1(encoding=3, text=artist))
-        audio.save()
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if proc.returncode == 0 and os.path.exists(tmp_path):
+            os.replace(tmp_path, mp3_path)
+        else:
+            print(f"  ffmpeg 写入标签失败: {proc.stderr.strip()}")
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
     except Exception as e:
         print(f"  写入 ID3 标签失败: {e}")
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def read_scored_excel(filepath):
@@ -157,7 +163,24 @@ def get_video_title_direct(bvid, delay=1.5):
     return ""
 
 
-def download_mp3(bvid, title, rank, mp3_dir, delay=3.0):
+def validate_mp3(filepath: str) -> bool:
+    """用 ffprobe 检测 MP3 是否为有效音频"""
+    if not os.path.exists(filepath):
+        return False
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
+             "-of", "csv=p=0", filepath],
+            capture_output=True, text=True, timeout=30,
+        )
+        if proc.returncode != 0:
+            return False
+        return "audio" in proc.stdout
+    except Exception:
+        return False
+
+
+def download_mp3(bvid, title, rank, mp3_dir, artist="", delay=3.0):
     yt_dlp = check_ytdlp()
 
     safe_title = sanitize_filename(title)
@@ -167,40 +190,67 @@ def download_mp3(bvid, title, rank, mp3_dir, delay=3.0):
 
     if os.path.exists(output_path):
         print(f"  已存在，跳过: {filename}")
-        return True, output_path
+        if validate_mp3(output_path):
+            write_id3_tags(output_path, title, artist)
+            return True, output_path
+        else:
+            print(f"  文件损坏，重新下载")
+            os.unlink(output_path)
 
     url = f"https://www.bilibili.com/video/{bvid}"
 
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": temp_pattern,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-            }
-        ],
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": False,
-        "sleep_interval_requests": 1.0,
-        "sleep_interval": delay,
-        "user_agent": HEADERS["User-Agent"],
-        "referer": "https://www.bilibili.com",
-    }
+    # 按优先级尝试不同的 format，直到一个通过验证
+    format_tries = ["bestaudio/best", "bestaudio", "140"]
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+    for attempt, fmt in enumerate(format_tries):
+        if attempt > 0:
+            print(f"  重试 format={fmt!r} ...")
+            time.sleep(delay)
+
+        ydl_opts = {
+            "format": fmt,
+            "outtmpl": temp_pattern,
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                }
+            ],
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": False,
+            "sleep_interval_requests": 1.0,
+            "sleep_interval": delay,
+            "user_agent": HEADERS["User-Agent"],
+            "referer": "https://www.bilibili.com",
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+        except Exception as e:
+            print(f"  下载失败 (format={fmt}): {e}")
+            # 清理可能产生的残余文件
+            for p in (output_path, output_path.replace(".mp3", ".m4a"), output_path.replace(".mp3", ".webm")):
+                if os.path.exists(p):
+                    os.unlink(p)
+            continue
+
+        # 检查是否生成文件（yt-dlp 可能输出 .m4a 或 .webm 后转 .mp3）
         if os.path.exists(output_path):
-            write_id3_tags(output_path, title)
-            return True, output_path
+            if validate_mp3(output_path):
+                write_id3_tags(output_path, title, artist)
+                return True, output_path
+            else:
+                print(f"  文件验证失败 (format={fmt})")
+                for p in (output_path, output_path.replace(".mp3", ".m4a"), output_path.replace(".mp3", ".webm")):
+                    if os.path.exists(p):
+                        os.unlink(p)
         else:
-            print(f"  下载完成但文件未找到: {output_path}")
-            return False, None
-    except Exception as e:
-        print(f"  下载失败: {e}")
-        return False, None
+            print(f"  下载完成但未找到输出文件 (format={fmt})")
+
+    print(f"  {filename} 所有 format 尝试均失败")
+    return False, None
 
 
 def _collect_mp3_files(manifest):
@@ -223,7 +273,23 @@ def main():
     parser.add_argument("--download-only", action="store_true", help="仅下载，不执行网易云操作")
     parser.add_argument("--ncm-only", action="store_true", help="仅执行网易云操作（跳过下载）")
     parser.add_argument("--cookies", default=None, help="B站 Cookie 文件路径（当前下载不需要）")
+    parser.add_argument("--retag", action="store_true", help="读取 manifest 重新写入 ID3 标签（歌名+歌手）")
     args = parser.parse_args()
+
+    if args.retag:
+        manifest = load_manifest()
+        entries = manifest.get("entries", [])
+        count = 0
+        for entry in entries:
+            fp = entry.get("filepath", "")
+            if fp and os.path.exists(fp):
+                title = entry.get("song_name", entry.get("title", ""))
+                artist = detect_artist(entry.get("title", ""))
+                write_id3_tags(fp, title, artist)
+                count += 1
+                print(f"  {count:>3}. {os.path.basename(fp)} → title={title!r}, artist={artist!r}")
+        print(f"\n已更新 {count} 个文件的 ID3 标签")
+        return
 
     if args.ncm_only:
         manifest = load_manifest()
@@ -277,8 +343,8 @@ def main():
 
     print(f"\n将下载前 {top_n} 个视频的音频:")
     for i, (bvid, score, title) in enumerate(selected, 1):
-        title_short = title[:50] if title else "(无标题)"
-        print(f"  {i:2d}. [{bvid}] {title_short} (得分: {score:.2f})")
+        song_name = extract_song_name(title) if title else "(无标题)"
+        print(f"  {i:2d}. [{bvid}] {song_name} (得分: {score:.2f})")
 
     confirm = input("\n确认开始下载? (y/n): ").strip().lower()
     if confirm != "y":
@@ -297,23 +363,28 @@ def main():
 
     print(f"\n开始下载 {top_n} 个视频...")
     for i, (bvid, score, title) in enumerate(selected, 1):
-        title_short = title[:40] if title else ""
-        print(f"\n  [{i}/{top_n}] {bvid} {title_short}")
+        song_name = extract_song_name(title)
+        print(f"\n  [{i}/{top_n}] {bvid} {song_name}")
 
         if bvid in existing_bvids:
             print(f"    已在 manifest 中，跳过")
             existing_entry = [e for e in manifest["entries"] if e["bvid"] == bvid][0]
+            fp = existing_entry.get("filepath", "")
+            if fp and os.path.exists(fp):
+                write_id3_tags(fp, existing_entry.get("song_name", existing_entry["title"]), detect_artist(existing_entry["title"]))
             new_entries.append(existing_entry)
             success_count += 1
             continue
 
-        ok, filepath = download_mp3(bvid, title, i, MP3_DIR, delay=3.0)
+        artist = detect_artist(title)
+        ok, filepath = download_mp3(bvid, song_name, i, MP3_DIR, artist=artist, delay=3.0)
         if ok:
             print(f"    OK -> {os.path.basename(filepath)}")
             success_count += 1
             entry = {
                 "bvid": bvid,
                 "title": title,
+                "song_name": song_name,
                 "score": round(score, 2),
                 "rank": i,
                 "filepath": filepath,
