@@ -58,7 +58,7 @@ async function main() {
 
   const history = loadHistory()
 
-  for (const file of files) {
+  for (const file of files.reverse()) {
     const rawName = path.basename(file)
     const encodedName = Buffer.from(rawName, 'utf-8').toString('latin1')
     const upload = async () => {

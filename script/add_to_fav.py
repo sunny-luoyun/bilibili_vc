@@ -300,7 +300,7 @@ def main():
     success = []
     failed = []
 
-    for i, (bvid, score, title) in enumerate(selected, 1):
+    for i, (bvid, score, title) in enumerate(reversed(selected), 1):
         title_short = title[:40] if title else ""
         print(f"  [{i}/{top_n}] {bvid} {title_short}", end=" ")
         sys.stdout.flush()
