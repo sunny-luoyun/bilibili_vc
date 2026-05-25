@@ -52,7 +52,7 @@ async function getCloudSongs(cookie) {
 }
 
 async function main() {
-  const playlistName = process.argv[2] || '本周周刊'
+  const playlistName = process.argv[2] || '周刊TOP10'
 
   const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'))
   if (history.length === 0) {

@@ -92,7 +92,7 @@ def upload_mp3s(mp3_files):
     return run_script("upload_to_cloud.js", mp3_files)[0]
 
 
-def create_playlist(playlist_name="本周周刊"):
+def create_playlist(playlist_name="周刊TOP10"):
     print(f"创建歌单「{playlist_name}」并添加歌曲...")
     return run_script("sync_to_playlist.js", [playlist_name])[0]
 

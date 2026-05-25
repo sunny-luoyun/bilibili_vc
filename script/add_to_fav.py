@@ -276,7 +276,7 @@ def main():
 
     folder_name = args.folder
     if not folder_name:
-        default_name = os.path.splitext(os.path.basename(score_file))[0] + f"_TOP{top_n}"
+        default_name = f"周刊TOP{top_n}"
         inp = input(f"收藏夹名称 (新建，默认: {default_name}): ").strip()
         folder_name = inp if inp else default_name
 

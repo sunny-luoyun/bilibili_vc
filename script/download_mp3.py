@@ -227,8 +227,8 @@ def main():
 
     if args.ncm_only:
         manifest = load_manifest()
-        playlist_name = args.ncm_playlist or "本周周刊"
         mp3_files = _collect_mp3_files(manifest)
+        playlist_name = args.ncm_playlist or f"周刊TOP{len(mp3_files)}"
         step = input("要执行的操作: 1=仅上传云盘  2=仅创建歌单  3=上传+创建歌单: ").strip()
         if step == "1":
             upload_mp3s(mp3_files)
@@ -349,7 +349,7 @@ def main():
 
     playlist_name = args.ncm_playlist
     if not playlist_name:
-        default_name = os.path.splitext(os.path.basename(score_file))[0] + f"_TOP{top_n}"
+        default_name = f"周刊TOP{top_n}"
         inp = input(f"网易云歌单名称 (默认: {default_name}): ").strip()
         playlist_name = inp if inp else default_name
 
