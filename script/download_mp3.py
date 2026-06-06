@@ -210,6 +210,140 @@ def validate_mp3(filepath: str) -> bool:
         return False
 
 
+def download_mp3_api(bvid, title, rank, mp3_dir, artist="", delay=3.0):
+    """Bilibili API 直连后备下载（当 yt-dlp 提取失败时使用）"""
+    import ssl
+    import urllib.request as ur
+
+    cookies = load_bilibili_cookies()
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    headers = {
+        "User-Agent": HEADERS["User-Agent"],
+        "Referer": "https://www.bilibili.com",
+    }
+    cookie_parts = []
+    for key in ("SESSDATA", "bili_jct", "DedeUserID"):
+        if cookies.get(key):
+            cookie_parts.append(f"{key}={cookies[key]}")
+    if cookie_parts:
+        headers["Cookie"] = "; ".join(cookie_parts)
+
+    safe_title = sanitize_filename(title)
+    filename = f"{rank:02d}_{safe_title}.mp3"
+    output_path = os.path.join(mp3_dir, filename)
+
+    if os.path.exists(output_path):
+        if validate_mp3(output_path):
+            write_id3_tags(output_path, title, artist)
+            return True, output_path
+        os.unlink(output_path)
+
+    # Step 1: get video info (aid, cid)
+    time.sleep(delay)
+    view_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+    req = ur.Request(view_url, headers=headers)
+    try:
+        resp = ur.urlopen(req, timeout=15, context=ctx)
+        data = json.loads(resp.read().decode("utf-8"))
+        if data.get("code") != 0:
+            print(f"  视讯API错误: {data.get('message')}")
+            return False, None
+        aid = data["data"]["aid"]
+        cid = data["data"]["cid"]
+        print(f"  API获取: aid={aid}, cid={cid}")
+    except Exception as e:
+        print(f"  视讯API失败: {e}")
+        return False, None
+
+    # Step 2: get play URL with DASH audio
+    time.sleep(delay)
+    play_url = (
+        f"https://api.bilibili.com/x/player/playurl?avid={aid}&cid={cid}"
+        f"&qn=0&fnver=0&fnval=4048&platform=web&otype=json"
+    )
+    req2 = ur.Request(play_url, headers=headers)
+    try:
+        resp2 = ur.urlopen(req2, timeout=15, context=ctx)
+        play_data = json.loads(resp2.read().decode("utf-8"))
+        if play_data.get("code") != 0:
+            print(f"  播放API错误: {play_data.get('message')}")
+            return False, None
+        dash = play_data["data"].get("dash", {})
+        audios = dash.get("audio", [])
+        if not audios:
+            print("  DASH音频轨道不存在")
+            return False, None
+        audios.sort(key=lambda x: x.get("bandwidth", 0), reverse=True)
+        best = audios[0]
+        audio_url = best.get("baseUrl", "")
+        if not audio_url and best.get("backupUrl"):
+            audio_url = best["backupUrl"][0]
+        print(f"  音频: id={best['id']}, codec={best.get('codecs','?')}, bw={best.get('bandwidth','?')}")
+    except Exception as e:
+        print(f"  播放API失败: {e}")
+        return False, None
+
+    if not audio_url:
+        return False, None
+
+    # Step 3: download raw audio
+    temp_raw = output_path + ".raw.m4s"
+    dl_headers = {
+        "User-Agent": HEADERS["User-Agent"],
+        "Referer": "https://www.bilibili.com",
+    }
+    try:
+        req3 = ur.Request(audio_url, headers=dl_headers)
+        resp3 = ur.urlopen(req3, timeout=300, context=ctx)
+        content_len = int(resp3.headers.get("Content-Length", 0))
+        downloaded = 0
+        with open(temp_raw, "wb") as f:
+            while True:
+                chunk = resp3.read(65536)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if content_len and downloaded % (1024 * 1024) == 0:
+                    pct = downloaded * 100 // content_len
+                    print(f"    下载中: {pct}% ({downloaded // 1024 // 1024}MB)", end="\r")
+        if content_len:
+            print(f"\r    下载完成: 100% ({downloaded // 1024 // 1024}MB)")
+    except Exception as e:
+        print(f"  音频下载失败: {e}")
+        if os.path.exists(temp_raw):
+            os.unlink(temp_raw)
+        return False, None
+
+    # Step 4: convert to MP3
+    import subprocess
+    mp3_output = output_path
+    ffmpeg_cmd = ["ffmpeg", "-y", "-i", temp_raw, "-vn", "-acodec", "libmp3lame", "-q:a", "2", mp3_output]
+    try:
+        proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
+        if proc.returncode != 0 or not os.path.exists(mp3_output):
+            ffmpeg_cmd2 = ["ffmpeg", "-y", "-i", temp_raw, "-vn", "-c:a", "copy", mp3_output]
+            proc2 = subprocess.run(ffmpeg_cmd2, capture_output=True, text=True, timeout=300)
+            if proc2.returncode != 0 or not os.path.exists(mp3_output):
+                print(f"  ffmpeg转换失败: {proc2.stderr.strip()[:100]}")
+                return False, None
+    except Exception as e:
+        print(f"  ffmpeg转换异常: {e}")
+        return False, None
+    finally:
+        if os.path.exists(temp_raw):
+            os.unlink(temp_raw)
+
+    if validate_mp3(output_path):
+        write_id3_tags(output_path, title, artist)
+        return True, output_path
+    print("  MP3验证失败")
+    return False, None
+
+
 def download_mp3(bvid, title, rank, mp3_dir, artist="", delay=3.0):
     yt_dlp = check_ytdlp()
 
@@ -294,6 +428,14 @@ def download_mp3(bvid, title, rank, mp3_dir, artist="", delay=3.0):
             print(f"  下载完成但未找到输出文件 (format={fmt})")
 
     print(f"  {filename} 所有 format 尝试均失败")
+
+    # 尝试 API 直连后备（针对 yt-dlp 提取失败的情况）
+    print(f"  → 尝试 API 直连后备...")
+    time.sleep(delay)
+    api_ok, api_path = download_mp3_api(bvid, title, rank, mp3_dir, artist=artist, delay=delay)
+    if api_ok:
+        return True, api_path
+
     return False, None
 
 
