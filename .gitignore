@@ -2,6 +2,8 @@
 *.txt
 *.db
 .DS_Store
+__pycache__/
+*.pyc
 *.json
 !/script/netease/package.json
 !/script/netease/package-lock.json
