@@ -32,6 +32,8 @@ SCORE_DIR = os.path.join(SCRIPT_DIR, "..", "score")
 MP3_DIR = os.path.join(WORKSPACE_DIR, "downloaded_mp3")
 MANIFEST_FILE = os.path.join(MP3_DIR, "manifest.json")
 
+COOKIE_FILE = os.path.join(WORKSPACE_DIR, "bilibili_cookies.json")
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -39,7 +41,35 @@ HEADERS = {
         "Chrome/120.0.0.0 Safari/537.36"
     ),
     "Referer": "https://www.bilibili.com",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Origin": "https://www.bilibili.com",
 }
+
+
+def load_bilibili_cookies():
+    if os.path.exists(COOKIE_FILE):
+        try:
+            with open(COOKIE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def ensure_cookie_file(cookies):
+    if not cookies:
+        return None
+    path = os.path.join(MP3_DIR, ".cookies.txt")
+    lines = [
+        "# Netscape HTTP Cookie File",
+        ".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tSESSDATA\t" + cookies.get("SESSDATA", ""),
+        ".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tbili_jct\t" + cookies.get("bili_jct", ""),
+        ".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tDedeUserID\t" + cookies.get("DedeUserID", ""),
+    ]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
 
 
 def sanitize_filename(name: str, max_len: int = 40) -> str:
@@ -199,6 +229,17 @@ def download_mp3(bvid, title, rank, mp3_dir, artist="", delay=3.0):
 
     url = f"https://www.bilibili.com/video/{bvid}"
 
+    cookies = load_bilibili_cookies()
+    cookie_file = ensure_cookie_file(cookies)
+
+    http_headers = {
+        "User-Agent": HEADERS["User-Agent"],
+        "Referer": HEADERS["Referer"],
+        "Accept": HEADERS["Accept"],
+        "Accept-Language": HEADERS["Accept-Language"],
+        "Origin": HEADERS["Origin"],
+    }
+
     # 按优先级尝试不同的 format，直到一个通过验证
     format_tries = ["bestaudio/best", "bestaudio", "140"]
 
@@ -221,8 +262,11 @@ def download_mp3(bvid, title, rank, mp3_dir, artist="", delay=3.0):
             "extract_flat": False,
             "sleep_interval_requests": 1.0,
             "sleep_interval": delay,
+            "http_headers": http_headers,
             "user_agent": HEADERS["User-Agent"],
             "referer": "https://www.bilibili.com",
+            "extractor_args": {"bilibili": ["no_webproxy=True"]},
+            "cookiefile": cookie_file,
         }
 
         try:
