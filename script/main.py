@@ -27,6 +27,7 @@ from typing import List, Dict, Optional
 # ---------- 全局配置 ----------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE_DIR = os.path.join(SCRIPT_DIR, "..", "workspace")
+DATA_DIR = os.path.join(SCRIPT_DIR, "..", "data")
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 # 脚本路径（确保与 main.py 同目录）
 SCRIPTS = {
@@ -474,28 +475,40 @@ def menu_merge():
     merge_result_files(files_to_merge, out_path)
 
 
+def _pick_file_from_dir(dir_path: str, prompt: str, exclude: str = None) -> str:
+    """列出目录下所有 .xlsx 文件，让用户选择，返回选中文件的完整路径。"""
+    files = sorted(f for f in os.listdir(dir_path) if f.endswith(".xlsx"))
+    if exclude:
+        files = [f for f in files if os.path.join(dir_path, f) != exclude]
+    if not files:
+        print(f"{dir_path} 下没有 .xlsx 文件")
+        return None
+    print(f"\n可用文件:")
+    for i, f in enumerate(files, 1):
+        size = os.path.getsize(os.path.join(dir_path, f))
+        print(f"  {i}. {f} ({size / 1024:.1f} KB)")
+    sel = input(prompt).strip()
+    if not sel.isdigit() or not (1 <= int(sel) <= len(files)):
+        print("无效选择")
+        return None
+    return os.path.join(dir_path, files[int(sel) - 1])
+
+
 def menu_score():
     """9. 计算得分（score_diff.py）"""
     print("\n▶ 计算增量得分")
-    file1 = input("第一个时间点文件 (旧): ").strip()
-    if not os.path.isabs(file1):
-        file1 = os.path.join(WORKSPACE_DIR, file1)
-    if not os.path.exists(file1):
-        print("文件不存在")
+    file1 = _pick_file_from_dir(DATA_DIR, "请选择旧文件 (输入序号): ")
+    if not file1:
         return
-    file2 = input("第二个时间点文件 (新): ").strip()
-    if not os.path.isabs(file2):
-        file2 = os.path.join(WORKSPACE_DIR, file2)
-    if not os.path.exists(file2):
-        print("文件不存在")
+    file2 = _pick_file_from_dir(DATA_DIR, "请选择新文件 (输入序号): ", exclude=file1)
+    if not file2:
         return
-    out = input("输出文件 (默认自动生成): ").strip()
+    out = input("输出文件名 (默认自动生成): ").strip()
     cmd = [sys.executable, SCRIPTS["score_diff"], file1, file2]
     if out:
-        if not os.path.isabs(out):
-            SCORE_DIR = os.path.join(SCRIPT_DIR, "..", "score")
-            os.makedirs(SCORE_DIR, exist_ok=True)
-            out = os.path.join(SCORE_DIR, out)
+        SCORE_DIR = os.path.join(SCRIPT_DIR, "..", "score")
+        os.makedirs(SCORE_DIR, exist_ok=True)
+        out = os.path.join(SCORE_DIR, out)
         cmd.extend(["-o", out])
     run_cmd(cmd)
 
