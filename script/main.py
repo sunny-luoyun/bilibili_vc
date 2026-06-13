@@ -448,7 +448,7 @@ def menu_download():
 def menu_merge():
     """8. 合并结果文件（扫描 SCRIPT_DIR 下 .xlsx 文件）"""
     print("\n▶ 合并多个Excel文件")
-    xlsx_files = [f for f in os.listdir(WORKSPACE_DIR) if f.endswith(".xlsx")]
+    xlsx_files = sorted(f for f in os.listdir(WORKSPACE_DIR) if f.endswith(".xlsx"))
     if not xlsx_files:
         print(f"未在 {WORKSPACE_DIR} 中找到任何 .xlsx 文件")
         return
@@ -516,7 +516,7 @@ def menu_score():
 def menu_add_to_fav():
     """11. 将算分结果前 N 个视频加入收藏夹"""
     print("\n▶ 将算分结果加入B站收藏夹")
-    score_files = [f for f in os.listdir(os.path.join(SCRIPT_DIR, "..", "score")) if f.endswith(".xlsx")]
+    score_files = sorted(f for f in os.listdir(os.path.join(SCRIPT_DIR, "..", "score")) if f.endswith(".xlsx"))
     if not score_files:
         print(f"score/ 目录下没有算分文件，请先运行「9. 计算得分」")
         return
@@ -548,7 +548,7 @@ def menu_delete_instances():
 def menu_download_mp3():
     """12. 下载MP3并上传网易云云盘"""
     print("\n▶ 下载算分结果前N个视频的MP3 → 上传网易云云盘 → 创建歌单")
-    score_files = [f for f in os.listdir(os.path.join(SCRIPT_DIR, "..", "score")) if f.endswith(".xlsx")]
+    score_files = sorted(f for f in os.listdir(os.path.join(SCRIPT_DIR, "..", "score")) if f.endswith(".xlsx"))
     if not score_files:
         print(f"score/ 目录下没有算分文件，请先运行「9. 计算得分」")
         return
